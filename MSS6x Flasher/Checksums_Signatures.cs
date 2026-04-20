@@ -7,22 +7,45 @@ namespace MSS6x_Flasher
 {
     class Checksums_Signatures
     {
-        public byte[] GetSecurityAccessMessage(byte[] userID, byte[] serialNumber, byte[] seed)
+        public byte[] GetSecurityAccessMessage(byte[] userID, byte[] serialNumber, byte[] seed, byte securityAccesslevel)
         {
             BigInteger n = 1;
             BigInteger d = 0;
 
-            if (Global.HW_Ref == "0569Q60")
+            if (securityAccesslevel == 3)
             {
-                n = BigInteger.Parse("8696140873888434446387975732326763523249545954768330639267165602855312564078476997195475125527812090097980466687030439806610464985599164179002751305271403");
-                d = BigInteger.Parse("7453835034761515239761122056280083019928182246944283405086141945304553626352816724383157056945283320916196838651674180905727480578257637388246812114390247");
-            }
+                if (Global.HW_Ref == "0569Q60")
+                {
+                    n = BigInteger.Parse("8696140873888434446387975732326763523249545954768330639267165602855312564078476997195475125527812090097980466687030439806610464985599164179002751305271403");
+                    d = BigInteger.Parse("7453835034761515239761122056280083019928182246944283405086141945304553626352816724383157056945283320916196838651674180905727480578257637388246812114390247");
+                }
 
-            if (Global.HW_Ref == "0569QT0")
-            {
-                n = BigInteger.Parse("8872204441036755971493396648972430644566544772201619424097935037771336781905258690489188917401812198294877658309097685765054576652302159306784660331677077");
-                d = BigInteger.Parse("2534915554581930277569541899706408755590441363486176978313695725077524794830019003951231561805102167208019053855272364025197896095040928732790152893329463");
+                if (Global.HW_Ref == "0569QT0")
+                {
+                    n = BigInteger.Parse("8872204441036755971493396648972430644566544772201619424097935037771336781905258690489188917401812198294877658309097685765054576652302159306784660331677077");
+                    d = BigInteger.Parse("2534915554581930277569541899706408755590441363486176978313695725077524794830019003951231561805102167208019053855272364025197896095040928732790152893329463");
+                }
             }
+            if (securityAccesslevel == 4 || securityAccesslevel == 5)
+            {
+                if (Global.HW_Ref == "0569Q60")
+                {
+                    n = BigInteger.Parse("8253757306003757868525777640169718604932757000074920874994222231950868821969719190712750985526407274522827192794874008844597111915352953813986651252706633");
+                    d = BigInteger.Parse("7074649119431792458736380834431187375656648857207075035709333341672173275973885995701180450272895466422858788882048044419385699526129917451317091936651703");
+                }
+
+                if (Global.HW_Ref == "0569QT0")
+                {
+                    n = BigInteger.Parse("8602771258417735749409814056345908435532661082027266916548055133294227378955678061118286524160442955777175472033945102551026362228399822502680246206318147");
+                    d = BigInteger.Parse("4915869290524420428234179460769090534590092046872723952313174361882415645117422898322886570890084852966859241876825067830373967643297871614608359208031223");
+                }
+            }
+            /*if (securityAccesslevel == 5)
+            {
+                    n = BigInteger.Parse("8209836131236623540106248032442393614982637631141339598467747244677911494877848116936777629774248859738700738214196985237506543807286694994580847683477459");
+                    d = BigInteger.Parse("5864168665169016814361605737458852582130455450815242570334105174769936782055474121615341083788171349392703586501785350322243672467184174299268442897849743");
+            }*/
+
 
             byte[] toHash = userID.Concat(serialNumber.Concat(seed)).ToArray(); //Hash of UserID + Serial Number + Random number = authentication message
 
@@ -48,7 +71,7 @@ namespace MSS6x_Flasher
 
 
 
-            byte[] authHeader = { 01, 00, 00, 00, 0x00, 00, 00, 00, 00, 00, 00, 00, 00, 0x44, 00, 00, 00, 00, 00, 00, 00, 00, 00, 00, 0x10 }; //Ediabas wants to see this header -- full meaning can be seen in those comments
+            byte[] authHeader = { 01, 00, 00, 00, 00, 00, 00, 00, 00, 00, 00, 00, 00, 0x44, 00, 00, 00, 00, 00, 00, 00, 00, 00, 00, 0x10 }; //Ediabas wants to see this header -- full meaning can be seen in those comments
             byte[] authMessage = authHeader.Concat(authPayload).ToArray();
             
             return authMessage;
@@ -74,17 +97,17 @@ namespace MSS6x_Flasher
                 //Console.WriteLine(checksumStart.ToString("x"));
                 //Console.WriteLine(checksumEnd.ToString("x"));
 
-                crc = Crc32(DataToFlash.Skip((int)checksumStart).Take((int)(checksumEnd - checksumStart) + 1).ToArray(), crc);
+                crc = CalculateCRC32(DataToFlash.Skip((int)checksumStart).Take((int)(checksumEnd - checksumStart) + 1).ToArray(), crc);
             }
             crc = ~crc;
 
             byte[] CS_calc_array = BitConverter.GetBytes(crc).ToArray();
-            Console.WriteLine(BitConverter.ToString(CS_calc_array));
+            //Console.WriteLine(BitConverter.ToString(CS_calc_array));
             for (int i = 0; i < 4; ++i)
                 DataToFlash[0xFFFC + i] = CS_calc_array[3 - i];
 
-            for (int i = 0; i < 0xE0; ++i)
-                DataToFlash[0x20 + i] = 0xFF;
+            for (int i = 0x80; i < 0xC0; ++i)
+                DataToFlash[i] = 0xFF;
 
             return DataToFlash;
 
@@ -114,16 +137,16 @@ namespace MSS6x_Flasher
                     checksumEnd = checksumEnd - MemSubtract;
                 }
 
-                /*Console.WriteLine(checksumStart.ToString("x"));
-                Console.WriteLine(checksumEnd.ToString("x"));*/
+                /*//Console.WriteLine(checksumStart.ToString("x"));
+                //Console.WriteLine(checksumEnd.ToString("x"));*/
 
-                crc = Crc32(DataToFlash.Skip((int)checksumStart).Take((int)(checksumEnd - checksumStart) + 1).ToArray(), crc);
+                crc = CalculateCRC32(DataToFlash.Skip((int)checksumStart).Take((int)(checksumEnd - checksumStart) + 1).ToArray(), crc);
             }
 
             crc = ~crc;
 
             byte[] CS_calc_array = BitConverter.GetBytes(crc).ToArray();
-            Console.WriteLine(BitConverter.ToString(CS_calc_array));
+            //Console.WriteLine(BitConverter.ToString(CS_calc_array));
             for (int i = 0; i < 4; ++i)
                 DataToFlash[maxAddress - MemSubtract + 1 + i] = CS_calc_array[3 - i];
 
@@ -134,23 +157,19 @@ namespace MSS6x_Flasher
 
         }
 
-        public byte[] BypassRSA(byte[] binary)
+        public byte[] PatchProgram(byte[] binary)
         {
-            /*Basically all we're doing is doing some binary patches.
-             * Probably shoud verify that these work on all program variants, but I'm confident it's fine
-             * Majority of people will be on newest programs anyway
-             */
-
-            byte[] rsa_check = { 0x81, 0x86, 0x00, 0x00, 0x28, 0x0C, 0x00, 0x20, 0x40, 0x81, 0x00, 0x0C, 0x38, 0x60, 0xFF, 0xFF }; //At this point, the DME is checking if the signature is a valid length or not. 
-            byte[] rsa_patch = { 0x81, 0x86, 0x00, 0x00, 0x28, 0x0C, 0x00, 0x00, 0x41, 0x80, 0x00, 0x0C, 0x38, 0x60, 0x00, 0x00 }; //The patch modifies the code to always think the length is incorrect, and return a 0 (i.e passed) instead of -1 (fail).
-
-            byte[] ISN_Read_protect = { 0x48,0x00, 0x00, 0x10, 0x38,0x60,0x00,0x04 }; //Changes a return value from 04 to 03 (DME will send the buffer if 03, will send an FF or 00 if 04). 
-            byte[] ISN_Read_patch = { 0x48, 0x00, 0x00, 0x10, 0x38, 0x60, 0x00, 0x03 };
-
-            
-            int indexOfRSASequence = SearchBytes(binary, rsa_check);
-
             byte[] binary_patched = binary;
+
+            /* At this point, the DME is checking if the signature is a valid length or not.
+             * The patch modifies the code to always return a 0 (== passed) instead of -1 (fail).
+             * Lots of possible ways to accomplish the same net effect. 
+             */
+            byte[] rsa_check = { 0x81, 0x86, 0x00, 0x00, 0x28, 0x0C, 0x00, 0x20, 0x40, 0x81, 0x00, 0x0C, 0x38, 0x60, 0xFF, 0xFF };
+            //byte[] rsa_patch = { 0x81, 0x86, 0x00, 0x00, 0x28, 0x0C, 0x00, 0x00, 0x41, 0x80, 0x00, 0x0C, 0x38, 0x60, 0x00, 0x00 };
+            byte[] rsa_patch = { 0x81, 0x86, 0x00, 0x00, 0x28, 0x0C, 0x00, 0x20, 0x60, 0x00, 0x00, 0x00, 0x38, 0x60, 0x00, 0x00 };
+
+            int indexOfRSASequence = SearchBytes(binary, rsa_check);
             if (indexOfRSASequence != -1)
             {
                 for (int i = 0; i < rsa_patch.Length; ++i)
@@ -158,30 +177,60 @@ namespace MSS6x_Flasher
                 Console.WriteLine("RSA Patched @ 0x" + indexOfRSASequence.ToString("x"));
             }
 
-            //Technically the below isn't part of the RSA Patch, but it's easiest to just do it at the same time.
-            //Seemingly did not work on 080E, odd. 
-            int indexOfISNProtectSeqeuence = SearchBytes(binary, ISN_Read_protect);
-            if (indexOfISNProtectSeqeuence != -1)
+            //If an AIF is programmed into the DME and you have a program flashed with an empty tune, the DME will refuse to erase the program until a tune is flashed
+            //This is why I initially had to write a tune before doing a proper RSA patch
+            //Now I patch out the AIF check at the same time as the RSA bypass itself. Overall makes the whole bypass process faster
+            byte[] EraseRoutine_AIF_Check = {0x2C, 0x03, 0x00, 0x00, 0x40, 0x82, 0x00, 0x1C, 0x3B, 0xA0, 0x00, 0x08 };
+            byte[] EraseRoutine_AIF_Patch = { 0x2C, 0x03, 0x00, 0x00, 0x48, 0x00, 0x00, 0x1C, 0x3B, 0xA0, 0x00, 0x08 };
+
+            int indexOfEraseAIFSequence = SearchBytes(binary, EraseRoutine_AIF_Check);
+            if (indexOfEraseAIFSequence != -1)
             {
-                for (int i = 0; i < ISN_Read_patch.Length; ++i)
-                    binary_patched[indexOfISNProtectSeqeuence + i] = ISN_Read_patch[i];
-                Console.WriteLine("ISN Protection Patched @ 0x" + indexOfISNProtectSeqeuence.ToString("x"));
+                for (int i = 0; i < EraseRoutine_AIF_Check.Length; ++i)
+                    binary_patched[indexOfEraseAIFSequence + i] = EraseRoutine_AIF_Patch[i];
+                Console.WriteLine("Erase AIF Check Patched @ 0x" + indexOfEraseAIFSequence.ToString("x"));
             }
 
-            
+            // Changes a return value from 04 to 03 (DME will send the buffer if anything other than 0 or 04, will send an FF or 00 if 04).
+            //byte[] read_protect = { 0x48, 0x00, 0x00, 0x10, 0x38 ,0x60, 0x00, 0x04 }; 
+            //byte[] read_protect_patch = { 0x48, 0x00, 0x00, 0x10, 0x38, 0x60, 0x00, 0x03 };
 
-            //This copies the RSA pointers from 10204/70204 to 101c0/701c0 -- this will cause the RSA check to be done on preexisting boot code rather than new code
-            //This allows us to pass the check and copy over our patched boot sector without actually validating any new data
+            //Need to check whether this patch causes issues when trying to read a non-readable address. 
+            byte[] read_protect = { 0x7c, 0x03, 0x60, 0x40, 0x40, 0x82, 0x00, 0x0c, 0x38, 0x60, 0x00, 0x05 }; 
+            byte[] read_protect_patch = { 0x7c, 0x03, 0x60, 0x40, 0x60, 0x00, 0x00, 0x00, 0x38, 0x60, 0x00, 0x05 };
+            
+            int indexOfReadProtectSeqeuence = SearchBytes(binary, read_protect);
+            if (indexOfReadProtectSeqeuence != -1)
+            {
+                for (int i = 0; i < read_protect_patch.Length; ++i)
+                    binary_patched[indexOfReadProtectSeqeuence + i] = read_protect_patch[i];
+                Console.WriteLine("Read Protection Patched @ 0x" + indexOfReadProtectSeqeuence.ToString("x"));
+            }
+
+            //This set censor routine only exists on MSS60. It is called when you lock an EWS4 SK -- after it is done, the CPU cannot be read over BDM without clearing the censor (which wipes the flash)
+            //Both injection and ignition do have this code, though only ever called on injection side. The patch makes it so the DME skips the routine and returns 0
+            //This patch will not clear the censor if it is already set (i.e most MSS60s). It will only prevent it from being set
+            byte[] SetUC3FCensor_Routine = { 0x81, 0x3f, 0xc8, 0x00, 0x3d, 0x80, 0x03, 0x00, 0x55, 0x29, 0x01, 0x8e, 0x7c, 0x09, 0x60, 0x40, 0x41, 0x82, 0x01, 0x30 };
+            byte[] SetUC3FCensor_Patch = { 0x81, 0x3f, 0xc8, 0x00, 0x3d, 0x80, 0x03, 0x00, 0x55, 0x29, 0x01, 0x8e, 0x7c, 0x09, 0x60, 0x40, 0x48, 0x00, 0x01, 0x30 };
+
+            int indexOfCensorSequence = SearchBytes(binary, SetUC3FCensor_Routine);
+            if (indexOfCensorSequence != -1)
+            {
+                for (int i = 0; i < SetUC3FCensor_Patch.Length; ++i)
+                    binary_patched[indexOfCensorSequence + i] = SetUC3FCensor_Patch[i];
+                Console.WriteLine("UC3F Censor Routine Patched @ 0x" + indexOfCensorSequence.ToString("x"));
+            }
+
+            /*This copies the RSA pointers from 10204/70204 to 101c0/701c0 -- this will cause the RSA check to be done on preexisting boot code rather than new code
+             *This allows us to pass the check and copy over our patched boot sector without actually validating any new data
+             *This is not needed when flashing an already RSA bypassed DME, but these bytes are how I (and other flashing programs) detect whether an RSA bypass is present, so I write them anytime I patch the program
+             */
             for (int i = 0; i < 0x2C; ++i)
                 binary_patched[0x10204 + i] = binary_patched[0x101c0 + i];
 
-            //Probably don't need the below anymore since I skip writing those bytes now, but it makes me more comfortable to leave it after all the MSS65 bricks
-            //Specifically at 0x10080, there's a string of bytes that denote that the RSA Check was already performed and passed
-            //MSS65 doesn't protect these bytes at all. If you write them, the DME thinks the check passed. It will then erase the stock boot sector
-            //Unfortunately, that doesn't directly trigger the copy function, so you end up with a DME with a blank boot region
-            //Hence my paranoia in clearing these bytes even though my flash routines no longer even touch the
-            for (int i = 0; i < 0xC0; ++i)
-                binary_patched[0x10040 + i] = 0xFF;
+            //Erase the affe0815 'rsa passed' sequence 
+            for (int i = 0; i < 0x40; ++i)
+                binary_patched[0x10080 + i] = 0xFF;
 
             return binary_patched;
         }
@@ -190,17 +239,17 @@ namespace MSS6x_Flasher
         {
             byte[] Signature_Injection = binary.Skip(0x104).Take(0x80).ToArray();
             byte[] CalculatedMD5_Injection = CheckParamMD5(binary.Take(0x10000).ToArray());
-            Console.WriteLine("Calculated: " + BitConverter.ToString(CalculatedMD5_Injection));
+            //Console.WriteLine("Calculated: " + BitConverter.ToString(CalculatedMD5_Injection));
             byte[] DecryptedMD5_Injection = DecryptSignature(Signature_Injection);
-            Console.WriteLine("Decrypted: " + BitConverter.ToString(DecryptedMD5_Injection));
+            //Console.WriteLine("Decrypted: " + BitConverter.ToString(DecryptedMD5_Injection));
             bool Injection_Match = CalculatedMD5_Injection.SequenceEqual(DecryptedMD5_Injection);
             //Console.WriteLine(Injection_Match);
 
             byte[] Signature_Ignition = binary.Skip(0x10104).Take(0x80).ToArray();
             byte[] CalculatedMD5_Ignition = CheckParamMD5(binary.Skip(0x10000).Take(0x10000).ToArray());
-            Console.WriteLine("Calculated: " + BitConverter.ToString(CalculatedMD5_Ignition));
+            //Console.WriteLine("Calculated: " + BitConverter.ToString(CalculatedMD5_Ignition));
             byte[] DecryptedMD5_Ignition = DecryptSignature(Signature_Ignition);
-            Console.WriteLine("Decrypted: " + BitConverter.ToString(DecryptedMD5_Ignition));
+            //Console.WriteLine("Decrypted: " + BitConverter.ToString(DecryptedMD5_Ignition));
             bool Ignition_Match = CalculatedMD5_Ignition.SequenceEqual(DecryptedMD5_Ignition);
             //Console.WriteLine(Ignition_Match);
             return (Injection_Match && Ignition_Match);
@@ -210,17 +259,17 @@ namespace MSS6x_Flasher
         {
             byte[] Signature_Injection = binary.Skip(0x10104).Take(0x80).ToArray();
             byte[] CalculatedMD5_Injection = CheckProgramMD5(binary.Take(0x280000).ToArray());
-            Console.WriteLine("Calculated: " + BitConverter.ToString(CalculatedMD5_Injection));
+            //Console.WriteLine("Calculated: " + BitConverter.ToString(CalculatedMD5_Injection));
             byte[] DecryptedMD5_Injection = DecryptSignature(Signature_Injection);
-            Console.WriteLine("Decrypted: " + BitConverter.ToString(DecryptedMD5_Injection));
+            //Console.WriteLine("Decrypted: " + BitConverter.ToString(DecryptedMD5_Injection));
             bool Injection_Match = CalculatedMD5_Injection.SequenceEqual(DecryptedMD5_Injection);
             //Console.WriteLine(Injection_Match);
 
             byte[] Signature_Ignition = binary.Skip(0x290104).Take(0x80).ToArray();
             byte[] CalculatedMD5_Ignition = CheckProgramMD5(binary.Skip(0x280000).Take(0x280000).ToArray());
-            Console.WriteLine("Calculated: " + BitConverter.ToString(CalculatedMD5_Ignition));
+            //Console.WriteLine("Calculated: " + BitConverter.ToString(CalculatedMD5_Ignition));
             byte[] DecryptedMD5_Ignition = DecryptSignature(Signature_Ignition);
-            Console.WriteLine("Decrypted: " + BitConverter.ToString(DecryptedMD5_Ignition));
+            //Console.WriteLine("Decrypted: " + BitConverter.ToString(DecryptedMD5_Ignition));
             bool Ignition_Match = CalculatedMD5_Ignition.SequenceEqual(DecryptedMD5_Ignition);
             //Console.WriteLine(Ignition_Match);
             return (Injection_Match && Ignition_Match);
@@ -237,7 +286,6 @@ namespace MSS6x_Flasher
             for (int i = 0; i < numberOfSegments; ++i)
             {
                 segment_start = BitConverter.ToUInt32(binary.Skip(0x1C4 + (8 * i)).Take(4).Reverse().ToArray(), 0) - MemSubtract;
-
                 segment_end = BitConverter.ToUInt32(binary.Skip(0x1C8 + (8 * i)).Take(4).Reverse().ToArray(), 0) - MemSubtract;
                 //Console.WriteLine(checksumStart.ToString("x"));
                 //Console.WriteLine(checksumEnd.ToString("x"));
@@ -248,6 +296,7 @@ namespace MSS6x_Flasher
             MD5 md5hash = MD5.Create();
             byte[] hash = new byte[16];
             hash = md5hash.ComputeHash(toHash); //generate MD5 
+            //If private key is ever factored or leaked, this hash can be signed to generate a valid signature
 
             return hash;
         }
@@ -277,7 +326,7 @@ namespace MSS6x_Flasher
 
             MD5 md5hash = MD5.Create();
             byte[] hash = new byte[16];
-            hash = md5hash.ComputeHash(toHash); //generate MD5 
+            hash = md5hash.ComputeHash(toHash);
 
             return hash;
         }
@@ -285,13 +334,26 @@ namespace MSS6x_Flasher
         private byte[] DecryptSignature(byte[] Signature)
         {
             BigInteger n = 1;
-            n = BigInteger.Parse("114042781749945754155193684304062515265250817826233262485981219735727053774369690563600757146222783995046157841392053358295567986112209298210934101483936176969137584875063033908405034200263553238461435326052045462761398743874020899471819971230329912258328571253256856424399489516538996026252224471705119091253");
-
             if (Global.HW_Ref == "0569Q60")
+            {
                 n = BigInteger.Parse("112821069661138377315645977154981754818872711926253513954324506501925985219019412578651128376416548224217522142353410732220016028299360336544291257377851034205695695238581306745471969610106200216032551948699692549703274834151266414339482674326328156914539053791993861051643608033403003484660081699180996047157");
+            }
+            
             if (Global.HW_Ref == "0569QT0")
-                n = BigInteger.Parse("114042781749945754155193684304062515265250817826233262485981219735727053774369690563600757146222783995046157841392053358295567986112209298210934101483936176969137584875063033908405034200263553238461435326052045462761398743874020899471819971230329912258328571253256856424399489516538996026252224471705119091253");
+            {
+                if (Global.Prog_Vers_internal_uint == 530)
+                {
+					//v530 prototype uses a different signing key. I suspect other prototypes do as well, but can't confirm
+                    //Worth implementing signing those binaries?
+					n = BigInteger.Parse("114202887327969767912813185724984560286311767411013655718162781605186657344931388634900851134893589309575054620353736326969354268958541565106297759609905717273852190357233619336152002477267788219527276170504229835617938468677166803770215288630415351752605271247120739821211047806402971122312644277678970489071");
+				}
+				else
+                {
+                    n = BigInteger.Parse("114042781749945754155193684304062515265250817826233262485981219735727053774369690563600757146222783995046157841392053358295567986112209298210934101483936176969137584875063033908405034200263553238461435326052045462761398743874020899471819971230329912258328571253256856424399489516538996026252224471705119091253");
+                }
+            }
             int e = 3;
+
 
             byte[] SignatureReverseDWORD = new byte[0];
 
@@ -308,6 +370,7 @@ namespace MSS6x_Flasher
 
             return DecryptedArray;
         }
+
         private static byte[] Append0(byte[] array) //Array to BigInt function needs a 0 appended to the result to ensure the value is interpreted as positive
         {
             byte[] appended = new byte[array.Length + 1];
@@ -318,30 +381,9 @@ namespace MSS6x_Flasher
             return appended;
         }
 
-        private uint CalculateChecksum(byte[] binary, uint checkSumSegmentNumberPointer, uint initialValue, uint MemSubtract, uint maxAddress)
+        private uint CalculateCRC32(byte[] buffer, uint initial)
         {
-            uint numberOfSegments = BitConverter.ToUInt32(binary.Skip((int)checkSumSegmentNumberPointer).Take(4).Reverse().ToArray(), 0);
-            uint checksumStart = 0;
-            uint checksumEnd = 0;
-            uint initial = initialValue;
-
-            for (int i = 0; i < numberOfSegments; ++i)
-            {
-                checksumStart = BitConverter.ToUInt32(binary.Skip((int)checkSumSegmentNumberPointer + 4 + (8 * i)).Take(4).Reverse().ToArray(), 0) - MemSubtract;
-
-                checksumEnd = BitConverter.ToUInt32(binary.Skip((int)checkSumSegmentNumberPointer + 8 + (8 * i)).Take(4).Reverse().ToArray(), 0) - MemSubtract;
-                if (checksumEnd > maxAddress - MemSubtract)
-                    checksumEnd = maxAddress - MemSubtract;
-
-                initial = Crc32(binary.Skip((int)checksumStart).Take((int)(checksumEnd - checksumStart) + 1).ToArray(), initial);
-            }
-
-            return ~initial;
-        }
-
-        private uint Crc32(byte[] buffer, uint initial)
-        {
-            uint[] table =
+            uint[] crc32_table =
             {
                  0x00000000, 0x77073096, 0xEE0E612C, 0x990951BA,
                  0x076DC419, 0x706AF48F, 0xE963A535, 0x9E6495A3,
@@ -410,12 +452,12 @@ namespace MSS6x_Flasher
         };
 
             {
-                uint crc = initial;
+                uint crc32 = initial;
 
                 for (int i = 0; i < buffer.Length; ++i)
-                    crc = table[(crc ^ buffer[i]) & 0xFF] ^ (crc >> 8);
+                    crc32 = crc32_table[(crc32 ^ buffer[i]) & 0xFF] ^ (crc32 >> 8);
 
-                return crc;
+                return crc32;
             }
         }
 

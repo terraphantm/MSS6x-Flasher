@@ -22,15 +22,34 @@
         <DockPanel Grid.ColumnSpan="2">
             <Menu Width="Auto" Height="20"  DockPanel.Dock="Top">
                 <MenuItem Header="_File">
+                    <MenuItem x:Name="LoadFile_MenuItem" Header="_Load File" Click="LoadFile_Click" IsEnabled="{Binding ElementName=LoadFile_button, Path=IsEnabled}"/>
+                    <Separator></Separator>
                     <MenuItem x:Name="AppExit" Header="E_xit" HorizontalAlignment="Left" Click="AppExit_Click"/>
+                </MenuItem>
+                <MenuItem Name="DME_Commands" Header="DME _Commands" IsEnabled="True">
+                    <MenuItem x:Name="Ident_DME_MenuItem" Header="Identify DME" Click="IdentDME_Click" IsEnabled="{Binding ElementName=IdentifyDME, Path=IsEnabled}"/>
+                    <MenuItem x:Name="Read_Tune_MenuItem" Header="Read Tune" Click="ReadTune_Click" IsEnabled="{Binding ElementName=ReadTune_button, Path=IsEnabled}"/>
+                    <MenuItem x:Name="Read_Full_MenuItem" Header="Read Full Flash"  Click="ReadFull_Click" IsEnabled="{Binding ElementName=ReadFull_button, Path=IsEnabled}"/>
+                    <Separator></Separator>
+                    <MenuItem x:Name="Flash_Tune_MenuItem" Header="Flash Tune" Click="FlashData_Click" IsEnabled="{Binding ElementName=FlashTune_button, Path=IsEnabled}"/>
+                    <MenuItem x:Name="Flash_Full_MenuItem" Header="Flash Full Program"  Click="FlashProgram_Click" IsEnabled="{Binding ElementName=FlashProgram_button, Path=IsEnabled}"/>
+
+                    <Separator></Separator>
+                    <MenuItem x:Name="Reset_DME_MenuITem" Header="Reset DME" Click="Reset_DME_Click" IsEnabled="{Binding ElementName=IdentifyDME, Path=IsEnabled}"/>
                 </MenuItem>
                 <MenuItem x:Name = "AdvancedMenu" Header="_Advanced" IsEnabled="False">
                     <MenuItem x:Name="Read_Full_Long" Header="Read Full (Long)" Click="Read_Full_Long_Click"/>
                     <MenuItem x:Name="Read_ISN_SK" Header="Read ISN / Secret Key"  Click="Read_ISN_SK_Click"/>
                     <MenuItem x:Name="Read_RAM" Header="Read RAM" Click="Read_RAM_Click"/>
                     <Separator></Separator>
-                    <!--<MenuItem x:Name="RSA_Bypass_Slow" Header="Flash RSA Bypass (Slow)" Click="FlashRSA_Bypass_Slow_Click" IsEnabled="False"/>-->
-                    <MenuItem x:Name="RSA_Bypass_Fast" Header="Flash RSA Bypass" Click="FlashRSA_Bypass_Fast_Click" IsEnabled="False"/>
+                    <MenuItem x:Name="RSA_Bypass" Header="Flash RSA Bypass" Click="FlashRSA_Bypass_Click" IsEnabled="False"/>
+                    <MenuItem x:Name="RestoreStock" Header="Restore Stock (Remove RSA bypass)" Click="RestoreStock_Click" IsEnabled="False"/>
+                    <Separator></Separator>
+                    <MenuItem x:Name="RequestSecurityAccess_MenuItem" Header="Request Security access">
+                        <MenuItem x:Name="Level_3" Header="Level 3" Click="Level_3_Click"/>
+                        <MenuItem x:Name="Level_4" Header="Level 4" Click="Level_4_Click"/>
+                        <MenuItem x:Name="Level_5" Header="Level 5" Click="Level_5_Click"/>
+                    </MenuItem>
                 </MenuItem>
             </Menu>
             <StackPanel></StackPanel>
@@ -48,30 +67,27 @@
             <Label x:Name="VIN_Box" Content="" Margin="0,47,0,0" Background="#7FFFFFFF" Height="26" VerticalAlignment="Top" HorizontalAlignment="Right" Width="222"/>
             <Label x:Name="HWRef_Box" Content="" Margin="0,73,0,0" Background="#7FFFFFFF" Height="26" VerticalAlignment="Top" HorizontalAlignment="Right" Width="222"/>
             <Label x:Name="ZIF_Box" Content="" Margin="0,99,0,0" Background="#7FFFFFFF" Height="26" VerticalAlignment="Top" HorizontalAlignment="Right" Width="222"/>
-            <Label x:Name="SWRef_Box" Content="" Margin="0,125,0,0" Background="#7FFFFFFF" Height="26" VerticalAlignment="Top" HorizontalAlignment="Right" Width="222"/>
+            <Label x:Name="Calibration_Reference_Box" Content="" Margin="0,125,0,0" Background="#7FFFFFFF" Height="26" VerticalAlignment="Top" HorizontalAlignment="Right" Width="222"/>
             <Label x:Name="programStatus_Box" Content="" Margin="0,151,0,0" Background="#7FFFFFFF" Height="26" VerticalAlignment="Top" HorizontalAlignment="Right" Width="222"/>
         </Grid>
 
         <ProgressBar x:Name="ProgressDME" Margin="20,230,13,0" IsEnabled="False" Minimum="0" Maximum="4096" Value="0" Height="36" ValueChanged="ProgressDME_ValueChanged" VerticalAlignment="Top" Foreground="#FF009ADA"/>
         <StackPanel x:Name ="FunctionStack" Margin="7,24,10,0" Height="270" VerticalAlignment="Top" Grid.Column="1">
-            <Button x:Name="IdentifyDME" Content="Identify DME" Height="27" Click="IdentifyDME_Click" Background="#FFDDDDDD" BorderBrush="#FF707070"/>
+            <Button x:Name="IdentifyDME" Content="Identify DME" Height="27" Click="IdentDME_Click" Background="#FFDDDDDD" BorderBrush="#FF707070"/>
             <Separator Height="27" Margin="0" RenderTransformOrigin="0.492,0.28" Opacity="0"/>
 
-            <Button x:Name="ReadTune" Content="Read Tune" Height="27" Click="ReadTune_Click" IsEnabled="False" Background="#FFDDDDDD" BorderBrush="#FF707070"/>
-            <Button x:Name="ReadFull" Content="Read Full Flash" Height="27" Click="ReadFull_Click" IsEnabled="False" Background="#FFDDDDDD" BorderBrush="#FF707070"/>
+            <Button x:Name="ReadTune_button" Content="Read Tune" Height="27" Click="ReadTune_Click" IsEnabled="False" Background="#FFDDDDDD" BorderBrush="#FF707070"/>
+            <Button x:Name="ReadFull_button" Content="Read Full Flash" Height="27" Click="ReadFull_Click" IsEnabled="False" Background="#FFDDDDDD" BorderBrush="#FF707070"/>
             <Separator Height="27" Margin="0" RenderTransformOrigin="0.492,0.28" Opacity="0"/>
-            <Button x:Name="LoadFile" Content="Load File" Height="27" Click="LoadFile_Click" IsEnabled="False" Background="#FFDDDDDD" BorderBrush="#FF707070"/>
+            <Button x:Name="LoadFile_button" Content="Load File" Height="27" Click="LoadFile_Click" IsEnabled="False" Background="#FFDDDDDD" BorderBrush="#FF707070"/>
             <Separator Height="27" Margin="0" RenderTransformOrigin="0.492,0.28" Opacity="0"/>
-            <!--<Button x:Name="FlashRSA_Bypass" Content="Flash RSA Bypass" Height="27" IsEnabled="False" Click="FlashRSA_Bypass_Click" Background="#FFDDDDDD" BorderBrush="#FF707070"/>
-            <Separator Height="27" Margin="0" RenderTransformOrigin="0.492,0.28" Opacity="0"/>-->
-            <Button x:Name="FlashDME" Content="Flash Tune" Height="27" Click="FlashData_Click" IsEnabled="False" Background="#FFDDDDDD" BorderBrush="#FF707070"/>
-            <Button x:Name="FlashProgram" Content="Flash Program" Height="27" IsEnabled="False" Click="FlashProgram_Click" Background="#FFDDDDDD" BorderBrush="#FF707070"/>
+            <Button x:Name="FlashTune_button" Content="Flash Tune" Height="27" Click="FlashData_Click" IsEnabled="False" Background="#FFDDDDDD" BorderBrush="#FF707070"/>
+            <Button x:Name="FlashProgram_button" Content="Flash Full Program" Height="27" IsEnabled="False" Click="FlashProgram_Click" Background="#FFDDDDDD" BorderBrush="#FF707070"/>
         </StackPanel>
-        <!--<CheckBox x:Name="FullBin_CheckBox" Content="Full Binary" Margin="0,310,414,0" Click="FullBin_CheckBox_Changed" IsEnabled="False" HorizontalAlignment="Right" Width="103" Height="15" VerticalAlignment="Top"/>-->
-        <TextBox x:Name="statusTextBlock" Text="" TextWrapping="Wrap" Margin="20,188,13,0" VerticalAlignment="Top" VerticalContentAlignment="Bottom" Foreground="Black" Height="38" BorderThickness ="0" BorderBrush="{x:Null}" AllowDrop="False" IsReadOnly="True" IsReadOnlyCaretVisible="False" />
+               <TextBox x:Name="statusTextBlock" Text="" TextWrapping="Wrap" Margin="20,188,13,0" VerticalAlignment="Top" VerticalContentAlignment="Bottom" Foreground="Black" Height="38" BorderThickness ="0" BorderBrush="{x:Null}" AllowDrop="False" IsReadOnly="True" IsReadOnlyCaretVisible="False" />
         <TextBlock Margin="19,284,0,0" TextAlignment="Left" Foreground="#FF666666" Grid.ColumnSpan="2" Height="16" VerticalAlignment="Top" HorizontalAlignment="Left" Width="534">
             Provided at no cost by M3Forum.us
-            <Hyperlink NavigateUri="https://nam3forum.com/forums/forum/e9x-2008-2013/e9x-coding-tuning/11026-mss6x-flasher-beta-testers-requested" RequestNavigate="Url_Click">Click here for latest version</Hyperlink>
+            <Hyperlink NavigateUri="https://nam3forum.com/forums/forum/e9x-2008-2013/e9x-coding-tuning/11026" RequestNavigate="Url_Click">Click here for latest version</Hyperlink>
         </TextBlock>
     </Grid>
 </Window>
