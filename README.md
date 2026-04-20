@@ -3,7 +3,7 @@
 This is a free application that can be used to read and write to the Siemens MSS60 and MSS65 DMEs found in the MY2008 - 2013 BMW M3, 2006 - 2010 BMW M5, and 2006 - 2010 M6. This application may also be compatible with specialty vehicles that also use this DME, such as the BMW Motorsport M3, however that is untested.
 
 ## Requirements:
-* A computer or virtual machine with .NET Framework 4.5 – I believe this means Windows 7 or newer. There may be hacks to get .NET 4.5 to work on earlier versions of Windows, but I cannot confirm their reliability.
+* A computer or virtual machine with .NET Framework 4.8.1. Windows 11 for ARM is supported.
 * A functional Ediabas install. Or at the very least, the following files
 * 10Flash.prg (other "XFlash.prg" files may work, but untested)
 * MS_S65, MS_S65_2, MS_S65_3, or MSS60.prg (for this application’s purposes, any of those files are sufficient for both the MSS60 and MSS65)
