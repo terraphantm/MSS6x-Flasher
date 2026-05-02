@@ -1372,8 +1372,8 @@ namespace MSS6x_Flasher
 
 
             //This hack to bypass RSA seems to work on any MSS65 and MSS60s 140E (657) and older.
-            //Todo: Confirm whether there are any software variants between 140E and 220E, and if so if any of them can take advantage of this trick.
-            //For now software newer than 140E / v657 will be assumed to require a true RSA bypass
+            //Todo: Confirm whether there are any software variants between 140E and 170E, and if so if any of them can take advantage of this trick.
+            //For now software newer than 140E / v657 will be assumed to require a true RSA bypass -- however I suspect anything older than v700 would work
             if ((Global.HW_Ref == "0569Q60" || (Global.HW_Ref == "0569QT0" && (Global.Prog_Vers_internal_uint <= 657))))
             {
                 affe0815_bypass = true;
@@ -1387,35 +1387,37 @@ namespace MSS6x_Flasher
 
             using (EdiabasNet ediabas = StartEdiabas(ConfigurationManager.AppSettings["Port"], ConfigurationManager.AppSettings["ecuPath"], ConfigurationManager.AppSettings["defaultSGBD"]))
             {
-                RSABypassInstalled = IsRSASegmentReadable_Bypassed(ediabas)[1];
-                RSABypassReadable = IsRSASegmentReadable_Bypassed(ediabas)[0];
+                bool[] RSABypassArray = IsRSASegmentReadable_Bypassed(ediabas);
+                RSABypassReadable = RSABypassArray[0];
+                RSABypassInstalled = RSABypassArray[1];
+            }
 
-                if (!IsSigValid && !RSABypassInstalled && !affe0815_bypass && !pseudoRSABypass)
+            if (!IsSigValid && !RSABypassInstalled && !affe0815_bypass && !pseudoRSABypass)
+            {
+                string msg = String.Empty;
+                if (RSABypassReadable)
                 {
-                    string msg = String.Empty;
-                    if (RSABypassReadable)
-                    {
-                        msg = "Warning: We have detected you are trying to flash a non-stock tune. We cannot detect an RSA bypass. " +
-                                     "Flashing this tune is likely to fail unless your RSA is bypassed by a different method (e.g BDM).\n\nWould you like to continue?";
-                    }
-                    else
-                    {
-                        msg = "Warning: We have detected you are trying to flash a non-stock tune. We are unable to read the RSA segments from your DME. " +
-                                     "This usually means your DME is read locked or a recent program flash failed. If you know your RSA is definitely bypassed, you may continue to flash.\n\nWould you like to continue?";
-                    }
+                    msg = "Warning: We have detected you are trying to flash a non-stock tune. We cannot detect an RSA bypass. " +
+                                    "Flashing this tune is likely to fail unless your RSA is bypassed by a different method (e.g BDM).\n\nWould you like to continue?";
+                }
+                else
+                {
+                    msg = "Warning: We have detected you are trying to flash a non-stock tune. We are unable to read the RSA segments from your DME. " +
+                                    "This usually means your DME is read locked or a recent program flash failed. If you know your RSA is definitely bypassed, you may continue to flash.\n\nWould you like to continue?";
+                }
                 
-                    MessageBoxResult result =  MessageBox.Show(msg, "Unable to detect RSA Bypass",  MessageBoxButton.YesNo,  MessageBoxImage.Warning);
-                    if (result == MessageBoxResult.No)
+                MessageBoxResult result =  MessageBox.Show(msg, "Unable to detect RSA Bypass",  MessageBoxButton.YesNo,  MessageBoxImage.Warning);
+                if (result == MessageBoxResult.No)
+                {
+                    this.Dispatcher.Invoke(() =>
                     {
-                        this.Dispatcher.Invoke(() =>
-                        {
-                            statusTextBlock.Text = "Tune write cancelled";
-                        });
-                        ReenableButtons(this, null);
-                        return false;
-                    }
+                        statusTextBlock.Text = "Tune write cancelled";
+                    });
+                    ReenableButtons(this, null);
+                    return false;
                 }
             }
+            
 
 
 
@@ -2027,10 +2029,13 @@ namespace MSS6x_Flasher
                 }
                 BitConverter.GetBytes(blockStart).CopyTo(flashHeader, 17);
 
-                this.Dispatcher.BeginInvoke((Action)(() =>
+                if (FlashingText != String.Empty)
                 {
-                    statusTextBlock.Text = FlashingText + " @ 0x" + blockStart.ToString("x");
-                }));
+                    this.Dispatcher.BeginInvoke((Action)(() =>
+                    {
+                        statusTextBlock.Text = FlashingText + " @ 0x" + blockStart.ToString("x");
+                    }));
+                }
 
                 if (!ExecuteJob(ediabas, flashJob, flashHeader.Concat(toFlash.Skip((int)(blockStart) - (int)blockStartOrig).Take(flashSegLength)).Concat(three).ToArray())) //See Ediabas comments for details on what the flash message should look like
                 {
