@@ -86,7 +86,7 @@
         </StackPanel>
                <TextBox x:Name="statusTextBlock" Text="" TextWrapping="Wrap" Margin="20,188,13,0" VerticalAlignment="Top" VerticalContentAlignment="Bottom" Foreground="Black" Height="38" BorderThickness ="0" BorderBrush="{x:Null}" AllowDrop="False" IsReadOnly="True" IsReadOnlyCaretVisible="False" />
         <TextBlock Margin="19,284,0,0" TextAlignment="Left" Foreground="#FF666666" Grid.ColumnSpan="2" Height="16" VerticalAlignment="Top" HorizontalAlignment="Left" Width="534">
-            Provided at no cost by M3Forum.us
+            Provided at no cost by NAM3Forum
             <Hyperlink NavigateUri="https://nam3forum.com/forums/forum/e9x-2008-2013/e9x-coding-tuning/11026" RequestNavigate="Url_Click">Click here for latest version</Hyperlink>
         </TextBlock>
     </Grid>

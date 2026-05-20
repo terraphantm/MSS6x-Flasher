@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Configuration;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -39,6 +40,7 @@ namespace MSS6x_Flasher
         public MainWindow()
         {
             InitializeComponent();
+            System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
         }
 
         private bool DMEBusy = false;
@@ -154,6 +156,7 @@ namespace MSS6x_Flasher
         private void  IdentDME()
         {
             string DMEType;
+
             using (EdiabasNet ediabas = StartEdiabas(ConfigurationManager.AppSettings["Port"], ConfigurationManager.AppSettings["ecuPath"], ConfigurationManager.AppSettings["defaultProgrammingSGBD"]))
             {
                 ExecuteJob(ediabas, "FLASH_PARAMETER_SETZEN", "0x12;64;64;254;Asymetrisch");
@@ -283,20 +286,96 @@ namespace MSS6x_Flasher
     }
 
 
-        private void LoadFile_Dialog()
+        private void LoadFile()
         {
             FlashTune_button.IsEnabled = false;
             FlashProgram_button.IsEnabled = false; 
             
             OpenFileDialog openFile = new OpenFileDialog();
-            openFile.InitialDirectory = System.IO.Path.GetDirectoryName(System.AppDomain.CurrentDomain.BaseDirectory);
-            openFile.Filter = "Binary|*.bin|Original File|*.ori|All Files|*.*";
-            Nullable<bool> result = openFile.ShowDialog();
+            try
+            {
+                openFile.InitialDirectory = System.IO.Path.GetFullPath(ConfigurationManager.AppSettings["HomeDirectory"]);
+            }
+            catch
+            {
+                openFile.InitialDirectory = System.IO.Path.GetDirectoryName(System.AppDomain.CurrentDomain.BaseDirectory);
+            }
+
+            openFile.Filter = "MSS6x Binary or Daten|*.bin;*.0pa;*.0da;*.paf;*.daf|All Files|*.*";
+            openFile.Title = "Select Program or Tune file";
+            Nullable<bool> result;
+            try
+            {
+                result = openFile.ShowDialog();
+            }
+            catch
+            {
+                openFile.InitialDirectory = System.IO.Path.GetDirectoryName(System.AppDomain.CurrentDomain.BaseDirectory);
+                result = openFile.ShowDialog();
+            }
+            string ext = Path.GetExtension(openFile.FileName);
             Global.openedFlash = null;
             byte[] file = new byte[0];
+            string path2 = String.Empty;
             if (result == true)
             {
-                file = File.ReadAllBytes(openFile.FileName);
+                if (ext == ".0pa" || ext == ".0da" || ext == ".paf" || ext == ".daf")
+                {
+                    file = Parse0pa0da(openFile.FileName);
+                    if (file.Length == 0x500000)
+                    {
+                        OpenFileDialog openFile2 = new OpenFileDialog();
+                        openFile2.InitialDirectory = System.IO.Path.GetDirectoryName(openFile.FileName);
+                        openFile2.Filter = "MSS6x 0da File|*.0da;*.daf";
+                        openFile2.Title = "Select 0da file";
+                        Nullable<bool> result2 = openFile2.ShowDialog();
+                        string ext2 = Path.GetExtension(openFile2.FileName);
+                        if (result2 == true)
+                        {
+                            byte[] file_0da = Parse0pa0da(openFile2.FileName);
+
+                            if (file_0da.Length == 0x20000)
+                            {
+                                for (int i = 0; i < 0x10000; ++i)
+                                {
+                                    file[0x70000 + i] = file_0da[i];
+                                    file[0x2F0000 + i] = file_0da[0x10000 + i];
+                                }
+                                path2 = " + " + System.IO.Path.GetFileName(openFile2.FileName);
+                            }
+                            else
+                            {
+                                file = null;
+                                file_0da = null;
+                                this.Dispatcher.Invoke(() =>
+                                {
+                                    statusTextBlock.Text = "Invalid 0da file";
+                                });
+                            }
+                        }
+                        else
+                        {
+                            file = null;
+                            this.Dispatcher.Invoke(() =>
+                            {
+                                statusTextBlock.Text = "Invalid 0pa file";
+                            });
+                        }
+                    }
+                    else if (file == null) 
+                    {
+                        file = null;
+                        this.Dispatcher.Invoke(() =>
+                        {
+                            statusTextBlock.Text = "Invalid 0pa / 0da file";
+                        });
+                    }
+                }
+                else
+                {
+                    file = File.ReadAllBytes(openFile.FileName);
+                }
+                
                 if(LoadFile_Checks(file))
                 {
                     Global.openedFlash = file;
@@ -311,7 +390,6 @@ namespace MSS6x_Flasher
                     file = null;
                 }
             }
-
             else
             {
                 FlashTune_button.IsEnabled = false;
@@ -320,16 +398,132 @@ namespace MSS6x_Flasher
                 RestoreStock.IsEnabled = false;
                 Global.openedFlash = null;
                 file = null;
+                this.Dispatcher.Invoke(() =>
+                {
+                    statusTextBlock.Text = "Unable to load file, try again";
+                });
             }
 
             if (Global.openedFlash != null)
             {
                 this.Dispatcher.Invoke(() =>
                 {
-                    statusTextBlock.Text = "Loaded " + System.IO.Path.GetFileName(openFile.FileName);
+                    statusTextBlock.Text = "Loaded " + Path.GetFileName(openFile.FileName) + path2;
                 });
             }
         }
+
+        private byte[] Parse0pa0da(string filePath)
+        {
+            byte[] binary = new byte[0];
+            uint extendedLinearAddress = 0;
+            uint extendedSegmentAddress = 0;
+            bool eofReached = false;
+            bool checksumMismatch = false;
+            string ext = Path.GetExtension(filePath);
+
+            if (ext == ".0pa" || ext == ".paf")
+            {
+                Array.Resize(ref binary, 0x500000);
+                for (int i = 0; i < binary.Length; i++)
+                    binary[i] = 0xFF;
+            }
+            else if (ext == ".0da" || ext == ".daf")
+            {
+                Array.Resize(ref binary, 0x20000);
+                for (int i = 0; i < binary.Length; i++)
+                    binary[i] = 0xFF;
+            }
+            else
+                return null;
+
+            foreach (string line in File.ReadLines(filePath))
+            {
+                if (string.IsNullOrWhiteSpace(line) || line[0] != ':') continue;
+                string record = line.Trim();
+                int byteCount = int.Parse(record.Substring(1, 2), NumberStyles.HexNumber);
+                uint address = uint.Parse(record.Substring(3, 4), NumberStyles.HexNumber);
+                int recordType = int.Parse(record.Substring(7, 2), NumberStyles.HexNumber);
+                string dataHex = record.Substring(9, byteCount * 2);
+                byte checksum = byte.Parse(record.Substring(9 + byteCount * 2, 2), NumberStyles.HexNumber);
+
+                // Validate Checksum
+                if (!ValidateIntelHexChecksum(record))
+                {
+                    Console.WriteLine("Checksum mismatch: " + record);
+                    checksumMismatch = true;
+                }
+
+
+                switch (recordType)
+                {
+                    case 0x00:
+                    case 0x10: // Data Record
+                        uint baseAddress = extendedLinearAddress + extendedSegmentAddress;
+                        if (ext == ".0pa" || ext == ".paf")
+                        {
+                            if (baseAddress < 0x70000) ;
+                            else if (baseAddress >= 0x400000 && baseAddress < 0x600000)
+                                baseAddress -= 0x380000;
+                            else if (baseAddress >= 0x800000 && baseAddress < 0x870000)
+                                baseAddress -= 0x580000;
+                            else if (baseAddress > 0xC00000 && baseAddress < 0xE00000)
+                                baseAddress -= 0x900000;
+                            else
+                                return null;
+                        }
+                        else if (ext == ".0da" || ext == ".daf")
+                        {
+                            if (baseAddress >= 0x70000 && baseAddress < 0x80000)
+                                baseAddress -= 0x70000;
+                            else if (baseAddress >= 0x870000 && baseAddress < 0x880000)
+                                baseAddress -= 0x860000;
+                            else if (baseAddress == 0) ;
+                            else
+                                return null;
+                        }
+                        uint currentRecordAddress = baseAddress + address;
+                        for (int i = 0; i < byteCount; i++)
+                        {
+                            byte dataByte = byte.Parse(dataHex.Substring(i * 2, 2), NumberStyles.HexNumber);
+                            binary[currentRecordAddress + (uint)i] = dataByte;
+                        }
+                        break;
+                    case 0x01: // End of File
+                        eofReached = true;
+                        break;
+                    case 0x02: // Extended Segment Address
+                        extendedSegmentAddress = uint.Parse(dataHex, NumberStyles.HexNumber) << 4;
+                        extendedLinearAddress = 0; // Type 02 and 04 are exclusive
+                        break;
+                    case 0x04: // Extended Linear Address
+                        extendedLinearAddress = uint.Parse(dataHex, NumberStyles.HexNumber) << 16;
+                        extendedSegmentAddress = 0;
+                        break;
+                }
+                if (eofReached) break;
+            }
+            if (!checksumMismatch)
+            {
+                return binary;
+            }
+            else
+            {
+                return null; 
+            }
+        }
+
+        private bool ValidateIntelHexChecksum(string line)
+        {
+            byte sum = 0;
+            for (int i = 1; i < line.Length - 2; i += 2)
+                sum += byte.Parse(line.Substring(i, 2), NumberStyles.HexNumber);
+
+            byte calculated = (byte)(~sum + 1);
+            byte actual = byte.Parse(line.Substring(line.Length - 2), NumberStyles.HexNumber);
+            return calculated == actual;
+        }
+
 
         private bool LoadFile_Checks(byte[] file)
         {
@@ -373,22 +567,31 @@ namespace MSS6x_Flasher
             else if (file.Length == 0x500000)
             {
                 if (VerifyProgramMatch(file))
-                {
-                    fileValid = true;
+                {        
                     Checksums_Signatures ChecksumsSignatures = new Checksums_Signatures();
                     FullBinIsLoaded(this, null);
                     FlashProgram_button.IsEnabled = true;
                     RSA_Bypass.IsEnabled = true;
                     string binref1 = System.Text.Encoding.ASCII.GetString(file.Skip(0x10248).Take(0x24).ToArray());
                     string zif = binref1.Substring(7, 5);
-                    if (VerifyCalibrationMatch(file.Skip(0x70000).Take(0x10000).Concat(file.Skip(0x70000 + 0x280000).Take(0x10000)).ToArray(), zif) && 
-                        VerifyCalibrationMatch(file.Skip(0x70000).Take(0x10000).Concat(file.Skip(0x70000 + 0x280000).Take(0x10000)).ToArray(), Global.ZIF))
+                    if (VerifyCalibrationMatch(file.Skip(0x70000).Take(0x10000).Concat(file.Skip(0x70000 + 0x280000).Take(0x10000)).ToArray(), zif))
                     {
-                        FlashTune_button.IsEnabled = true;
+                        fileValid = true;
+                        if (VerifyCalibrationMatch(file.Skip(0x70000).Take(0x10000).Concat(file.Skip(0x70000 + 0x280000).Take(0x10000)).ToArray(), Global.ZIF))
+                        {
+                            FlashTune_button.IsEnabled = true;
+                        }
+                        if (ChecksumsSignatures.IsProgramSignatureValid(file))
+                        {
+                            RestoreStock.IsEnabled = true;
+                        }
                     }
-                    if (ChecksumsSignatures.IsProgramSignatureValid(file))
+                    else
                     {
-                        RestoreStock.IsEnabled = true;
+                        this.Dispatcher.Invoke(() =>
+                        {
+                            statusTextBlock.Text = "Loaded tune and program do not match";
+                        });
                     }
                 }
                 else
@@ -405,6 +608,10 @@ namespace MSS6x_Flasher
                 FlashProgram_button.IsEnabled = false;
                 RSA_Bypass.IsEnabled = false;
                 RestoreStock.IsEnabled = false;
+                this.Dispatcher.Invoke(() =>
+                {
+                    statusTextBlock.Text = "Invalid file";
+                });
             }
             return fileValid;
         }
@@ -690,135 +897,182 @@ namespace MSS6x_Flasher
         }
 
         private async Task ReadRAM() 
-
         {
-            uint start = 0x3F8000;
-            uint end = 0x3fffff;
-            byte[] Injection = new byte[0];
-            byte[] Ignition = new byte[0];
-            string ReadingText = String.Empty;
-
-
-            using (EdiabasNet ediabas = StartEdiabas(ConfigurationManager.AppSettings["Port"], ConfigurationManager.AppSettings["ecuPath"], ConfigurationManager.AppSettings["defaultSGBD"]))
+            OpenFolderDialog openFolder = new OpenFolderDialog();
+            try
             {
-                DisableButtons(this, null);
-                ReadingText = "Reading Injection RAM";
-                await Task.Run(() => Injection = ReadMemory(ediabas, start, end, ReadingText));
+                openFolder.InitialDirectory = System.IO.Path.GetFullPath(ConfigurationManager.AppSettings["HomeDirectory"]);
+            }
+            catch
+            {
+                openFolder.InitialDirectory = System.IO.Path.GetDirectoryName(System.AppDomain.CurrentDomain.BaseDirectory);
+            }
+            openFolder.Title = "Select Save Directory";
+            Nullable<bool> result;
+            try
+            {
+                result = openFolder.ShowDialog();
+            }
+            catch
+            {
+                openFolder.InitialDirectory = System.IO.Path.GetDirectoryName(System.AppDomain.CurrentDomain.BaseDirectory);
+                result = openFolder.ShowDialog();
+            }
+            if (result == true)
+            {
+                uint start = 0x3F8000;
+                uint end = 0x3fffff;
+                byte[] Injection = new byte[0];
+                byte[] Ignition = new byte[0];
+                string ReadingText = String.Empty;
 
-                start += 0x800000;
-                end += 0x800000;
-
-                ReadingText = "Reading Ignition RAM";
-                await Task.Run(() => Ignition = ReadMemory(ediabas, start, end, ReadingText));
-                
-              
-
-                this.Dispatcher.Invoke(() =>
+                using (EdiabasNet ediabas = StartEdiabas(ConfigurationManager.AppSettings["Port"], ConfigurationManager.AppSettings["ecuPath"], ConfigurationManager.AppSettings["defaultSGBD"]))
                 {
-                    statusTextBlock.Text = String.Empty;
-                });
-                ReenableButtons(this, null);
-                // SaveFileDialog saveFile = new SaveFileDialog();
-                if (Injection.Length == 0x8000 && Ignition.Length == 0x8000)
-                {
-                    String VIN = Global.VIN;
+                    DisableButtons(this, null);
+                    ReadingText = "Reading Injection RAM";
+                    await Task.Run(() => Injection = ReadMemory(ediabas, start, end, ReadingText));
 
-                    String vers = Global.ZIF;
-                    if (vers[0] == 'Z')
-                        vers = vers.Substring(1) + "(v" + Global.Prog_Vers_internal_uint.ToString() + ")";
+                    start += 0x800000;
+                    end += 0x800000;
 
-                    string datetime = DateTime.Now.ToString("yyyyMMddHHmm");
+                    ReadingText = "Reading Ignition RAM";
+                    await Task.Run(() => Ignition = ReadMemory(ediabas, start, end, ReadingText));
 
-                    if (VIN == "")
+
+
+                    this.Dispatcher.Invoke(() =>
                     {
-                        VIN = "AA00000";
+                        statusTextBlock.Text = String.Empty;
+                    });
+                    ReenableButtons(this, null);
+                    // SaveFileDialog saveFile = new SaveFileDialog();
+                    if (Injection.Length == 0x8000 && Ignition.Length == 0x8000)
+                    {
+                        String VIN = Global.VIN;
+
+                        String vers = Global.ZIF;
+                        if (vers[0] == 'Z')
+                            vers = vers.Substring(1) + "(v" + Global.Prog_Vers_internal_uint.ToString() + ")";
+
+                        string datetime = DateTime.Now.ToString("yyyyMMddHHmm");
+
+                        if (VIN == "")
+                        {
+                            VIN = "AA00000";
+                        }
+
+
+                        DirectoryInfo SaveDirectory = Directory.CreateDirectory(openFolder.FolderName + @"\" + VIN);
+
+
+                        File.WriteAllBytes(SaveDirectory + @"\" + VIN + "_" + vers + "_" + "Injection_RAM_" + datetime + ".bin", Injection);
+                        File.WriteAllBytes(SaveDirectory + @"\" + VIN + "_" + vers + "_" + "Ignition_RAM_" + datetime + ".bin", Ignition);
+
+                        this.Dispatcher.Invoke(() =>
+                        {
+                            statusTextBlock.Text = "Done reading!\nFile Saved to: " + SaveDirectory.FullName;
+                        });
+
                     }
-                    DirectoryInfo SaveDirectory = Directory.CreateDirectory(VIN);
-                    File.WriteAllBytes(SaveDirectory + @"\" + VIN + "_" + vers + "_" + "Injection_RAM_" + datetime + ".bin", Injection);
-                    File.WriteAllBytes(SaveDirectory + @"\" + VIN + "_" + vers + "_" + "Ignition_RAM_" + datetime + ".bin", Ignition);
-                    System.Diagnostics.Process.Start(SaveDirectory.ToString());
 
-                    this.Dispatcher.Invoke(() =>
+                    else
                     {
-                        statusTextBlock.Text = "Done reading!\nFile Saved to: " + SaveDirectory.FullName;
-                    });
-                }
+                        this.Dispatcher.Invoke(() =>
+                        {
+                            statusTextBlock.Text = "Failed to read data. Please try again";
+                        });
+                    }
 
-                else
-                {
-                    this.Dispatcher.Invoke(() =>
-                    {
-                        statusTextBlock.Text = "Failed to read data. Please try again";
-                    });
                 }
-                
             }
         }
 
         private async Task ReadDME_Data()
         {
-            uint InjectionEnd = 0;
-            uint IgnitionEnd = 0;
-            byte[] Injection = new byte[0];
-            byte[] Ignition = new byte[0];
-            string ReadingText = String.Empty;
-
-            byte[] InjectionEndBytes = { };
-            byte[] IgnitionEndBytes = { };
-
-            using (EdiabasNet ediabas = StartEdiabas(ConfigurationManager.AppSettings["Port"], ConfigurationManager.AppSettings["ecuPath"], ConfigurationManager.AppSettings["defaultProgrammingSGBD"]))
+            OpenFolderDialog openFolder = new OpenFolderDialog();
+            try
             {
-
-                ExecuteJob(ediabas, "FLASH_PARAMETER_SETZEN", "0x12;64;64;254;Asymetrisch");
-
-                RequestSecurityAccess(ediabas);
+                openFolder.InitialDirectory = System.IO.Path.GetFullPath(ConfigurationManager.AppSettings["HomeDirectory"]);
             }
-
-            using (EdiabasNet ediabas = StartEdiabas(ConfigurationManager.AppSettings["Port"], ConfigurationManager.AppSettings["ecuPath"], ConfigurationManager.AppSettings["defaultSGBD"]))
+            catch
             {
-                DisableButtons(this, null);
+                openFolder.InitialDirectory = System.IO.Path.GetDirectoryName(System.AppDomain.CurrentDomain.BaseDirectory);
+            }
+            openFolder.Title = "Select Save Directory";
+            Nullable<bool> result;
+            try
+            {
+                result = openFolder.ShowDialog();
+            }
+            catch
+            {
+                openFolder.InitialDirectory = System.IO.Path.GetDirectoryName(System.AppDomain.CurrentDomain.BaseDirectory);
+                result = openFolder.ShowDialog();
+            }
+            if (result == true)
+            {
+                uint InjectionEnd = 0;
+                uint IgnitionEnd = 0;
+                byte[] Injection = new byte[0];
+                byte[] Ignition = new byte[0];
+                string ReadingText = String.Empty;
 
+                byte[] InjectionEndBytes = { };
+                byte[] IgnitionEndBytes = { };
 
-
-                await Task.Run(() => InjectionEndBytes = ReadMemory(ediabas, 0x7001C, 0x7001F, String.Empty));
-                await Task.Run(() => IgnitionEndBytes = ReadMemory(ediabas, 0x87001C, 0x87001F, String.Empty));
-
-                InjectionEnd = BitConverter.ToUInt32(InjectionEndBytes.Reverse().ToArray(), 0) + 16;
-                if (InjectionEnd < 0x70000 || InjectionEnd >= 0x7FFFC)
-                    InjectionEnd = 0x7FFFF;
-                ReadingText = "Reading Injection Tune";
-                await Task.Run(() => Injection = ReadMemory(ediabas, 0x70000, InjectionEnd, ReadingText));
-                if (InjectionEnd < 0x7FFFC)
+                using (EdiabasNet ediabas = StartEdiabas(ConfigurationManager.AppSettings["Port"], ConfigurationManager.AppSettings["ecuPath"], ConfigurationManager.AppSettings["defaultProgrammingSGBD"]))
                 {
-                    byte[] Checksum = { };
-                    int length = Injection.Length;
-                    Array.Resize(ref Injection, 0xFFFC);
-                    for (int i = length; i < 0xFFFC; ++i)
-                        Injection[i] = 0xFF;
 
-                    await Task.Run(() => Checksum = ReadMemory(ediabas, 0x7FFFC, 0x7FFFF, ReadingText));
-                    Injection = Injection.Concat(Checksum).ToArray();
+                    ExecuteJob(ediabas, "FLASH_PARAMETER_SETZEN", "0x12;64;64;254;Asymetrisch");
+
+                    RequestSecurityAccess(ediabas);
                 }
 
-                IgnitionEnd = BitConverter.ToUInt32(IgnitionEndBytes.Reverse().ToArray(), 0) + 0x800000 + 16;
-                if (IgnitionEnd < 0x870000 || IgnitionEnd >= 0x87FFFC)
-                    IgnitionEnd = 0x87FFFF;
-                ReadingText = "Reading Ignition Tune";
-                await Task.Run(() => Ignition = ReadMemory(ediabas, 0x870000, IgnitionEnd, ReadingText));
-                if (IgnitionEnd < 0x87FFFC)
+                using (EdiabasNet ediabas = StartEdiabas(ConfigurationManager.AppSettings["Port"], ConfigurationManager.AppSettings["ecuPath"], ConfigurationManager.AppSettings["defaultSGBD"]))
                 {
-                    byte[] Checksum = { };
-                    int length = Ignition.Length;
-                    Array.Resize(ref Ignition, 0xFFFC);
-                    for (int i = length; i < 0xFFFC; ++i)
-                        Ignition[i] = 0xFF;
+                    DisableButtons(this, null);
 
-                    await Task.Run(() => Checksum = ReadMemory(ediabas, 0x87FFFC, 0x87FFFF, ReadingText));
-                    Ignition = Ignition.Concat(Checksum).ToArray();
+
+
+                    await Task.Run(() => InjectionEndBytes = ReadMemory(ediabas, 0x7001C, 0x7001F, String.Empty));
+                    await Task.Run(() => IgnitionEndBytes = ReadMemory(ediabas, 0x87001C, 0x87001F, String.Empty));
+
+                    InjectionEnd = BitConverter.ToUInt32(InjectionEndBytes.Reverse().ToArray(), 0) + 16;
+                    if (InjectionEnd < 0x70000 || InjectionEnd >= 0x7FFFC)
+                        InjectionEnd = 0x7FFFF;
+                    ReadingText = "Reading Injection Tune";
+                    await Task.Run(() => Injection = ReadMemory(ediabas, 0x70000, InjectionEnd, ReadingText));
+                    if (InjectionEnd < 0x7FFFC)
+                    {
+                        byte[] Checksum = { };
+                        int length = Injection.Length;
+                        Array.Resize(ref Injection, 0xFFFC);
+                        for (int i = length; i < 0xFFFC; ++i)
+                            Injection[i] = 0xFF;
+
+                        await Task.Run(() => Checksum = ReadMemory(ediabas, 0x7FFFC, 0x7FFFF, ReadingText));
+                        Injection = Injection.Concat(Checksum).ToArray();
+                    }
+
+                    IgnitionEnd = BitConverter.ToUInt32(IgnitionEndBytes.Reverse().ToArray(), 0) + 0x800000 + 16;
+                    if (IgnitionEnd < 0x870000 || IgnitionEnd >= 0x87FFFC)
+                        IgnitionEnd = 0x87FFFF;
+                    ReadingText = "Reading Ignition Tune";
+                    await Task.Run(() => Ignition = ReadMemory(ediabas, 0x870000, IgnitionEnd, ReadingText));
+                    if (IgnitionEnd < 0x87FFFC)
+                    {
+                        byte[] Checksum = { };
+                        int length = Ignition.Length;
+                        Array.Resize(ref Ignition, 0xFFFC);
+                        for (int i = length; i < 0xFFFC; ++i)
+                            Ignition[i] = 0xFF;
+
+                        await Task.Run(() => Checksum = ReadMemory(ediabas, 0x87FFFC, 0x87FFFF, ReadingText));
+                        Ignition = Ignition.Concat(Checksum).ToArray();
+                    }
+
+                    ExecuteJob(ediabas, "STEUERGERAETE_RESET", String.Empty);
                 }
-
-                ExecuteJob(ediabas, "STEUERGERAETE_RESET", String.Empty);
-            }
                 ReenableButtons(this, null);
 
                 byte[] DumpedTune = Injection.Concat(Ignition).ToArray();
@@ -836,10 +1090,9 @@ namespace MSS6x_Flasher
                     {
                         VIN = "AA00000";
                     }
-                    DirectoryInfo SaveDirectory = Directory.CreateDirectory(VIN);
+                    DirectoryInfo SaveDirectory = Directory.CreateDirectory(openFolder.FolderName + @"\" + VIN);
                     File.WriteAllBytes(SaveDirectory + @"\" + VIN + "_" + vers + "_Tune_" + datetime + ".bin", Injection.Concat(Ignition).ToArray());
 
-                    System.Diagnostics.Process.Start(SaveDirectory.ToString());
 
                     this.Dispatcher.Invoke(() =>
                     {
@@ -854,203 +1107,226 @@ namespace MSS6x_Flasher
                     });
                 }
             }
+        }
        
         private async Task ReadDME_Full(bool QuickRead = true)
         {
-            uint start = 0;
-            uint end = 0;
-            byte[] Injection = new byte[0];
-            byte[] Ignition = new byte[0];
-
-            byte[] Injection_ext = new byte[0];
-            byte[] Ignition_ext = new byte[0];
-
-            byte[] Injection_ext_start = new byte[0];
-            byte[] Ignition_ext_start = new byte[0];
-
-            int inj_ext_length = 0;
-            int ign_ext_length = 0;
-
-            string ReadingText = String.Empty;
-
-            bool BDMFormat = false;
-            bool.TryParse(ConfigurationManager.AppSettings["ReadBDMFormat"], out BDMFormat);
-
-            using (EdiabasNet ediabas = StartEdiabas(ConfigurationManager.AppSettings["Port"], ConfigurationManager.AppSettings["ecuPath"], ConfigurationManager.AppSettings["defaultProgrammingSGBD"]))
+            OpenFolderDialog openFolder = new OpenFolderDialog();
+            try
             {
-
-                ExecuteJob(ediabas, "FLASH_PARAMETER_SETZEN", "0x12;64;64;254;Asymetrisch");
-
-                RequestSecurityAccess(ediabas);
+                openFolder.InitialDirectory = System.IO.Path.GetFullPath(ConfigurationManager.AppSettings["HomeDirectory"]);
             }
-
-            using (EdiabasNet ediabas = StartEdiabas(ConfigurationManager.AppSettings["Port"], ConfigurationManager.AppSettings["ecuPath"], ConfigurationManager.AppSettings["defaultSGBD"]))
+            catch
             {
-                DisableButtons(this, null);
-                start = 0x00000;
-                end = 0x7FFFF;
-                ReadingText = "Reading Injection Internal Flash";
-                await Task.Run(() => Injection = ReadMemory(ediabas, start, end, ReadingText));
+                openFolder.InitialDirectory = System.IO.Path.GetDirectoryName(System.AppDomain.CurrentDomain.BaseDirectory);
+            }
+            openFolder.Title = "Select Save Directory";
+            Nullable<bool> result;
+            try
+            {
+                result = openFolder.ShowDialog();
+            }
+            catch
+            {
+                openFolder.InitialDirectory = System.IO.Path.GetDirectoryName(System.AppDomain.CurrentDomain.BaseDirectory);
+                result = openFolder.ShowDialog();
+            }
+            if (result == true)
+            {
+                uint start = 0;
+                uint end = 0;
+                byte[] Injection = new byte[0];
+                byte[] Ignition = new byte[0];
 
-                if (QuickRead)
+                byte[] Injection_ext = new byte[0];
+                byte[] Ignition_ext = new byte[0];
+
+                byte[] Injection_ext_start = new byte[0];
+                byte[] Ignition_ext_start = new byte[0];
+
+                int inj_ext_length = 0;
+                int ign_ext_length = 0;
+
+                string ReadingText = String.Empty;
+
+                bool BDMFormat = false;
+                bool.TryParse(ConfigurationManager.AppSettings["ReadBDMFormat"], out BDMFormat);
+
+                using (EdiabasNet ediabas = StartEdiabas(ConfigurationManager.AppSettings["Port"], ConfigurationManager.AppSettings["ecuPath"], ConfigurationManager.AppSettings["defaultProgrammingSGBD"]))
                 {
-                    start = 0x400000;
-                    end = 0x407FFF;
-                    ReadingText = "Reading Injection Manufacturing data";
-                    await Task.Run(() => Injection_ext_start = ReadMemory(ediabas, start, end, ReadingText));
-                    Array.Resize(ref Injection_ext_start, 0x30000);
-                    for (int i = 0x8000; i < Injection_ext_start.Length; ++i)
-                        Injection_ext_start[i] = 0xFF;
 
-                    ReadingText = "Reading Injection External Flash";
-                    start = 0x430000;
-                    end = BitConverter.ToUInt32(Injection.Skip(0x1001c).Take(4).Reverse().ToArray(), 0) + 7;
-                    //Console.WriteLine(end);
-                    await Task.Run(() => Injection_ext = ReadMemory(ediabas, start, end, ReadingText));
-                    Injection_ext = Injection_ext_start.Concat(Injection_ext).ToArray();
+                    ExecuteJob(ediabas, "FLASH_PARAMETER_SETZEN", "0x12;64;64;254;Asymetrisch");
 
-                    inj_ext_length = Injection_ext.Length;
-                    Array.Resize(ref Injection_ext, 0x200000);
-                    for (int i = inj_ext_length; i < 0x200000; ++i)
-                        Injection_ext[i] = 0xFF;
-                }
-                else
-                {
-                    start = 0x400000;
-                    end = 0x5FFFFF;
-                    ReadingText = "Reading Injection External Flash";
-                    await Task.Run(() => Injection_ext = ReadMemory(ediabas, start, end, ReadingText));
-                }
-
-
-
-
-                start = 0x800000;
-                end = 0x87FFFF;
-                ReadingText = "Reading Ignition Internal Flash";
-                await Task.Run(() => Ignition = ReadMemory(ediabas, start, end, ReadingText));
-
-
-                if (QuickRead)
-                {
-                    start = 0xC00000;
-                    end = 0xC07FFF;
-                    ReadingText = "Reading Ignition Manufacturing data";
-                    await Task.Run(() => Ignition_ext_start = ReadMemory(ediabas, start, end, ReadingText));
-                    Array.Resize(ref Ignition_ext_start, 0x30000);
-                    for (int i = 0x8000; i < Ignition_ext_start.Length; ++i)
-                        Ignition_ext_start[i] = 0xFF;
-
-                    ReadingText = "Reading Ignition External Flash";
-                    start = 0xC30000;
-                    end = BitConverter.ToUInt32(Ignition.Skip(0x1001c).Take(4).Reverse().ToArray(), 0) + 7 + 0x800000;
-                    //Console.WriteLine(end);
-
-                    await Task.Run(() => Ignition_ext = ReadMemory(ediabas, start, end, ReadingText));
-                    Ignition_ext = Ignition_ext_start.Concat(Ignition_ext).ToArray();
-
-                    ign_ext_length = Ignition_ext.Length;
-                    Array.Resize(ref Ignition_ext, 0x200000);
-                    for (int i = ign_ext_length; i < 0x200000; ++i)
-                        Ignition_ext[i] = 0xFF;
-                }
-                else
-                {
-                    start = 0xC00000;
-                    end = 0xDFFFFF;
-                    ReadingText = "Reading Ignition External Flash";
-                    await Task.Run(() => Ignition_ext = ReadMemory(ediabas, start, end, ReadingText));
+                    RequestSecurityAccess(ediabas);
                 }
 
-
-                if (Global.HW_Ref == "0569QT0")
+                using (EdiabasNet ediabas = StartEdiabas(ConfigurationManager.AppSettings["Port"], ConfigurationManager.AppSettings["ecuPath"], ConfigurationManager.AppSettings["defaultSGBD"]))
                 {
-                    byte[] EWS4_SK_Header = { 0xA5, 0x00, 0xFF, 0xAA, 0xFF, 0xFF, 0xFF, 0xFF };
-                    if (!Injection.Skip(0x7948).Take(0x8).ToArray().SequenceEqual(EWS4_SK_Header))
+                    DisableButtons(this, null);
+                    start = 0x00000;
+                    end = 0x7FFFF;
+                    ReadingText = "Reading Injection Internal Flash";
+                    await Task.Run(() => Injection = ReadMemory(ediabas, start, end, ReadingText));
+
+                    if (QuickRead)
                     {
-                        byte[] InjRAMDump = new byte[0];
-                        ReadingText = "Reading RAM";
+                        start = 0x400000;
+                        end = 0x407FFF;
+                        ReadingText = "Reading Injection Manufacturing data";
+                        await Task.Run(() => Injection_ext_start = ReadMemory(ediabas, start, end, ReadingText));
+                        Array.Resize(ref Injection_ext_start, 0x30000);
+                        for (int i = 0x8000; i < Injection_ext_start.Length; ++i)
+                            Injection_ext_start[i] = 0xFF;
 
+                        ReadingText = "Reading Injection External Flash";
+                        start = 0x430000;
+                        end = BitConverter.ToUInt32(Injection.Skip(0x1001c).Take(4).Reverse().ToArray(), 0) + 7;
+                        //Console.WriteLine(end);
+                        await Task.Run(() => Injection_ext = ReadMemory(ediabas, start, end, ReadingText));
+                        Injection_ext = Injection_ext_start.Concat(Injection_ext).ToArray();
 
-                        await Task.Run(() => InjRAMDump = ReadMemory(ediabas, 0x3F8000, 0x3FFFFF, ReadingText));
-
-                        int IndexOfSK = FindSK(InjRAMDump);
-                        if (IndexOfSK == -1)
-                        {
-                            this.Dispatcher.Invoke(() =>
-                            {
-                                statusTextBlock.Text = "Could not find secret key";
-                            });
-                        }
-                        else
-                        {
-                            byte[] SK = InjRAMDump.Skip(IndexOfSK).Take(0x30).ToArray();
-                            byte[] EWS4_SK = EWS4_SK_Header.Concat(SK).ToArray();
-                            for (int i = 0; i < 0x38; ++i)
-                                Injection[0x7948 + i] = EWS4_SK[i];
-                        }
+                        inj_ext_length = Injection_ext.Length;
+                        Array.Resize(ref Injection_ext, 0x200000);
+                        for (int i = inj_ext_length; i < 0x200000; ++i)
+                            Injection_ext[i] = 0xFF;
                     }
-                }
-                ReenableButtons(this, null);
-                ExecuteJob(ediabas, "STEUERGERAETE_RESET", String.Empty);
-            }
+                    else
+                    {
+                        start = 0x400000;
+                        end = 0x5FFFFF;
+                        ReadingText = "Reading Injection External Flash";
+                        await Task.Run(() => Injection_ext = ReadMemory(ediabas, start, end, ReadingText));
+                    }
 
-            byte[] dumpedFlash = Injection.Concat(Injection_ext.Concat(Ignition.Concat(Ignition_ext))).ToArray();
-            ReenableButtons(this, null);
-            if (dumpedFlash.Length == 0x500000)
-            {
-                String VIN = Global.VIN;
-                string vers = Global.ZIF;
 
-                if (vers[0] == 'Z')
-                    vers = vers.Substring(1) + "_v" + Global.Prog_Vers_internal_uint.ToString();
 
-                if (VIN == "")
-                {
-                    VIN = "AA00000";
-                }
-                string datetime = DateTime.Now.ToString("yyyyMMddHHmm");
 
-                DirectoryInfo SaveDirectory = Directory.CreateDirectory(VIN);
-                File.WriteAllBytes(SaveDirectory + @"\" + VIN + "_" + vers + "_Full_" + datetime + ".bin", dumpedFlash);
-                File.WriteAllBytes(SaveDirectory + @"\" + VIN + "_" + vers + "_Tune_" + datetime + ".bin", Injection.Skip(0x70000).Take(0x10000).Concat(Ignition.Skip(0x70000).Take(0x10000)).ToArray());
-                if (BDMFormat)
-                {
-                    byte[] Shadow = new byte[0x200];
+                    start = 0x800000;
+                    end = 0x87FFFF;
+                    ReadingText = "Reading Ignition Internal Flash";
+                    await Task.Run(() => Ignition = ReadMemory(ediabas, start, end, ReadingText));
+
+
+                    if (QuickRead)
+                    {
+                        start = 0xC00000;
+                        end = 0xC07FFF;
+                        ReadingText = "Reading Ignition Manufacturing data";
+                        await Task.Run(() => Ignition_ext_start = ReadMemory(ediabas, start, end, ReadingText));
+                        Array.Resize(ref Ignition_ext_start, 0x30000);
+                        for (int i = 0x8000; i < Ignition_ext_start.Length; ++i)
+                            Ignition_ext_start[i] = 0xFF;
+
+                        ReadingText = "Reading Ignition External Flash";
+                        start = 0xC30000;
+                        end = BitConverter.ToUInt32(Ignition.Skip(0x1001c).Take(4).Reverse().ToArray(), 0) + 7 + 0x800000;
+                        //Console.WriteLine(end);
+
+                        await Task.Run(() => Ignition_ext = ReadMemory(ediabas, start, end, ReadingText));
+                        Ignition_ext = Ignition_ext_start.Concat(Ignition_ext).ToArray();
+
+                        ign_ext_length = Ignition_ext.Length;
+                        Array.Resize(ref Ignition_ext, 0x200000);
+                        for (int i = ign_ext_length; i < 0x200000; ++i)
+                            Ignition_ext[i] = 0xFF;
+                    }
+                    else
+                    {
+                        start = 0xC00000;
+                        end = 0xDFFFFF;
+                        ReadingText = "Reading Ignition External Flash";
+                        await Task.Run(() => Ignition_ext = ReadMemory(ediabas, start, end, ReadingText));
+                    }
+
 
                     if (Global.HW_Ref == "0569QT0")
                     {
-                        Shadow[0] = 0x20;
-                        Shadow[1] = 0x41;
+                        byte[] EWS4_SK_Header = { 0xA5, 0x00, 0xFF, 0xAA, 0xFF, 0xFF, 0xFF, 0xFF };
+                        if (!Injection.Skip(0x7948).Take(0x8).ToArray().SequenceEqual(EWS4_SK_Header))
+                        {
+                            byte[] InjRAMDump = new byte[0];
+                            ReadingText = "Reading RAM";
+
+
+                            await Task.Run(() => InjRAMDump = ReadMemory(ediabas, 0x3F8000, 0x3FFFFF, ReadingText));
+
+                            int IndexOfSK = FindSK(InjRAMDump);
+                            if (IndexOfSK == -1)
+                            {
+                                this.Dispatcher.Invoke(() =>
+                                {
+                                    statusTextBlock.Text = "Could not find secret key";
+                                });
+                            }
+                            else
+                            {
+                                byte[] SK = InjRAMDump.Skip(IndexOfSK).Take(0x30).ToArray();
+                                byte[] EWS4_SK = EWS4_SK_Header.Concat(SK).ToArray();
+                                for (int i = 0; i < 0x38; ++i)
+                                    Injection[0x7948 + i] = EWS4_SK[i];
+                            }
+                        }
                     }
-                    if (Global.HW_Ref == "0569Q60")
-                        Shadow[1] = 1;/*Technically this is not the true factory shadow section. 
+                    ReenableButtons(this, null);
+                    ExecuteJob(ediabas, "STEUERGERAETE_RESET", String.Empty);
+                }
+
+                byte[] dumpedFlash = Injection.Concat(Injection_ext.Concat(Ignition.Concat(Ignition_ext))).ToArray();
+                ReenableButtons(this, null);
+                if (dumpedFlash.Length == 0x500000)
+                {
+                    String VIN = Global.VIN;
+                    string vers = Global.ZIF;
+
+                    if (vers[0] == 'Z')
+                        vers = vers.Substring(1) + "_v" + Global.Prog_Vers_internal_uint.ToString();
+
+                    if (VIN == "")
+                    {
+                        VIN = "AA00000";
+                    }
+                    string datetime = DateTime.Now.ToString("yyyyMMddHHmm");
+
+                    DirectoryInfo SaveDirectory = Directory.CreateDirectory(openFolder.FolderName + @"\" + VIN);
+                    File.WriteAllBytes(SaveDirectory + @"\" + VIN + "_" + vers + "_Full_" + datetime + ".bin", dumpedFlash);
+                    File.WriteAllBytes(SaveDirectory + @"\" + VIN + "_" + vers + "_Tune_" + datetime + ".bin", Injection.Skip(0x70000).Take(0x10000).Concat(Ignition.Skip(0x70000).Take(0x10000)).ToArray());
+                    if (BDMFormat)
+                    {
+                        byte[] Shadow = new byte[0x200];
+
+                        if (Global.HW_Ref == "0569QT0")
+                        {
+                            Shadow[0] = 0x20;
+                            Shadow[1] = 0x41;
+                        }
+                        if (Global.HW_Ref == "0569Q60")
+                            Shadow[1] = 1;/*Technically this is not the true factory shadow section. 
                                        * But there's no harm and should reduce the risk of accidentally permalocking the MCU for anyone playing with the censor
                                        */
-                    
-                    for (int i = 4; i < 0x200; ++i)
-                        Shadow[i] = 0xFF;
 
-                    DirectoryInfo BDMSubdirectory = Directory.CreateDirectory(SaveDirectory + @"\" + VIN+ "_" + vers + "_BDM_" + datetime);
-                    File.WriteAllBytes(BDMSubdirectory.FullName + @"\Inj_MPC.bin", Injection);
-                    File.WriteAllBytes(BDMSubdirectory.FullName + @"\Inj_External.bin", Injection_ext);
-                    File.WriteAllBytes(BDMSubdirectory.FullName + @"\Ign_MPC.bin", Ignition);
-                    File.WriteAllBytes(BDMSubdirectory.FullName + @"\Ign_External.bin", Ignition_ext);
-                    File.WriteAllBytes(BDMSubdirectory.FullName + @"\Shadow.bin", Shadow);
+                        for (int i = 4; i < 0x200; ++i)
+                            Shadow[i] = 0xFF;
+
+                        DirectoryInfo BDMSubdirectory = Directory.CreateDirectory(SaveDirectory + @"\" + VIN + "_" + vers + "_BDM_" + datetime);
+                        File.WriteAllBytes(BDMSubdirectory.FullName + @"\Inj_MPC.bin", Injection);
+                        File.WriteAllBytes(BDMSubdirectory.FullName + @"\Inj_External.bin", Injection_ext);
+                        File.WriteAllBytes(BDMSubdirectory.FullName + @"\Ign_MPC.bin", Ignition);
+                        File.WriteAllBytes(BDMSubdirectory.FullName + @"\Ign_External.bin", Ignition_ext);
+                        File.WriteAllBytes(BDMSubdirectory.FullName + @"\Shadow.bin", Shadow);
+                    }
+
+                    this.Dispatcher.Invoke(() =>
+                    {
+                        statusTextBlock.Text = "Done reading!\nFiles Saved to: " + SaveDirectory.FullName;
+                    });
                 }
-                System.Diagnostics.Process.Start(SaveDirectory.ToString());
-
-                this.Dispatcher.Invoke(() =>
+                else
                 {
-                    statusTextBlock.Text = "Done reading!\nFiles Saved to: " + SaveDirectory.FullName;
-                });
-            }
-            else
-            {
-                this.Dispatcher.Invoke(() =>
-                {
-                    statusTextBlock.Text = "Failed to read data. Please try again";
-                });
+                    this.Dispatcher.Invoke(() =>
+                    {
+                        statusTextBlock.Text = "Failed to read data. Please try again";
+                    });
+                }
             }
 
         }
@@ -1075,6 +1351,27 @@ namespace MSS6x_Flasher
 
         private async Task ReadISN_SK()
         {
+            OpenFolderDialog openFolder = new OpenFolderDialog();
+            try
+            {
+                openFolder.InitialDirectory = System.IO.Path.GetFullPath(ConfigurationManager.AppSettings["HomeDirectory"]);
+            }
+            catch
+            {
+                openFolder.InitialDirectory = System.IO.Path.GetDirectoryName(System.AppDomain.CurrentDomain.BaseDirectory);
+            }
+            openFolder.Title = "Select Save Directory";
+            Nullable<bool> result;
+            try
+            {
+                result = openFolder.ShowDialog();
+            }
+            catch
+            {
+                openFolder.InitialDirectory = System.IO.Path.GetDirectoryName(System.AppDomain.CurrentDomain.BaseDirectory);
+                result = openFolder.ShowDialog();
+            }
+            if (result == true)
             {
                 uint start = 0x3f8000;
                 uint end = 0x3fffff;
@@ -1114,7 +1411,7 @@ namespace MSS6x_Flasher
                             VIN = "AA00000";
                         }
 
-                        DirectoryInfo SaveDirectory = Directory.CreateDirectory(VIN);
+                        DirectoryInfo SaveDirectory = Directory.CreateDirectory(openFolder.FolderName + @"\" + VIN);
                         SaveFileDialog saveFile = new SaveFileDialog();
                         {
                             saveFile.FileName = "ISN";
@@ -1123,7 +1420,7 @@ namespace MSS6x_Flasher
                             saveFile.Filter = "Binary|*.bin|Original File|*.ori|All Files|*.*";
                             try
                             {
-                                Nullable<bool> result = saveFile.ShowDialog();
+                                result = saveFile.ShowDialog();
                                 if (result == true)
                                     File.WriteAllBytes(saveFile.FileName, ISN);
                             }
@@ -1203,7 +1500,7 @@ namespace MSS6x_Flasher
                             saveFile.Filter = "Binary|*.bin|Original File|*.ori|All Files|*.*";
                             try
                             {
-                                Nullable<bool> result = saveFile.ShowDialog();
+                                result = saveFile.ShowDialog();
                                 if (result == true)
                                     File.WriteAllBytes(saveFile.FileName, EWS4_SK);
                             }
@@ -1358,7 +1655,8 @@ namespace MSS6x_Flasher
             bool IsSigValid =  ChecksumsSignatures.IsParamSignatureValid(tune);
             bool RSABypassInstalled = false;
             bool RSABypassReadable = false;
-            bool affe0815_bypass = false;
+            bool affe0815_bypass_possible = false;
+            bool affe0815_bypass_written = false;
             bool pseudoRSABypass = false;
             bool skipchecksums = false;
             byte[] affe0815_patch = new byte[64];
@@ -1376,7 +1674,7 @@ namespace MSS6x_Flasher
             //For now software newer than 140E / v657 will be assumed to require a true RSA bypass -- however I suspect anything older than v700 would work
             if ((Global.HW_Ref == "0569Q60" || (Global.HW_Ref == "0569QT0" && (Global.Prog_Vers_internal_uint <= 657))))
             {
-                affe0815_bypass = true;
+                affe0815_bypass_possible = true;
                 
                 affe0815_patch[0] = 0xaf;
                 affe0815_patch[1] = 0xfe;
@@ -1391,8 +1689,7 @@ namespace MSS6x_Flasher
                 RSABypassReadable = RSABypassArray[0];
                 RSABypassInstalled = RSABypassArray[1];
             }
-
-            if (!IsSigValid && !RSABypassInstalled && !affe0815_bypass && !pseudoRSABypass)
+            if (!IsSigValid && !RSABypassInstalled && !affe0815_bypass_possible && !pseudoRSABypass)
             {
                 string msg = String.Empty;
                 if (RSABypassReadable)
@@ -1451,7 +1748,7 @@ namespace MSS6x_Flasher
                 {
                     skipchecksums = true;
                 }
-                if (pseudoRSABypass && (affe0815_bypass || RSABypassInstalled))
+                if (pseudoRSABypass && (affe0815_bypass_possible || RSABypassInstalled))
                 {
                     injection = RemovePseudoRSABypass(injection);
                     ignition = RemovePseudoRSABypass(ignition);
@@ -1513,8 +1810,9 @@ namespace MSS6x_Flasher
                     await Task.Run(() => success = FlashBlock(ediabas, ignition.Skip(0xFFFC).ToArray(), 0x87FFFC, 0x87FFFF, FlashingText));
                 }
 
-                if (affe0815_bypass)
+                if (affe0815_bypass_possible && (!IsSigValid || !RSABypassInstalled))
                 {
+                    
                     if (success)
                     {
                         FlashingText = String.Empty;
@@ -1524,6 +1822,7 @@ namespace MSS6x_Flasher
                     {
                         await Task.Run(() => success = FlashBlock(ediabas, affe0815_patch, flashStart + 0x80 + IgnitionOffset, flashStart + 0xBF + IgnitionOffset, FlashingText));
                     }
+                    affe0815_bypass_written = true;
                 }
 
 
@@ -1546,7 +1845,7 @@ namespace MSS6x_Flasher
                             return;
                         }
                         
-                        if (!affe0815_bypass) 
+                        if (!affe0815_bypass_written) 
                                                         //If we're writing the "RSA Passed" bytes directly, no need to do a signature check.
                                                         //When the DME does reboot, it will be in normal operating mode
                         {
@@ -1814,7 +2113,6 @@ namespace MSS6x_Flasher
                         else
                             FlashingText = "Injection: Flashing Program Section 1";
                         await Task.Run(() => success = FlashBlock(ediabas, toFlash_InjInt_Sect1.Take(0x80).ToArray(), flashStart_Section1, flashStart_Section1 + 0x7F, FlashingText));
-                        //On MSS60, 0x10080 -> 0x100BF is protected
                     }
 
                     if (success)
@@ -2448,7 +2746,7 @@ namespace MSS6x_Flasher
         private void LoadFile_Click(object sender, RoutedEventArgs e)
         {
             UpdateProgressBar(0);
-            LoadFile_Dialog();
+            LoadFile();
         }
 
         private async void FlashData_Click(object sender, RoutedEventArgs e)

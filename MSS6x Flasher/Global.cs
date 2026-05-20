@@ -1,9 +1,8 @@
 ﻿using System;
-using System.Deployment.Application;
+using System.Configuration;
 using System.Reflection;
-
-
 namespace MSS6x_Flasher
+
 {
     public class Global
     {
@@ -14,6 +13,7 @@ namespace MSS6x_Flasher
         public static string ZIF;
         public static int programmingStatusByte = 0xFF;
         public static byte[] openedFlash = null;
+
         public static string[] programmingStatusStringArray =
         {
             "Delivery status","Normal operation",String.Empty,"Memory erased",String.Empty,
@@ -46,15 +46,20 @@ namespace MSS6x_Flasher
             string Title;
             try
             {
-                version = ApplicationDeployment.CurrentDeployment.CurrentVersion;
+                version = Assembly.GetExecutingAssembly().GetName().Version;
             }
             catch (Exception)
             {
-                version = Assembly.GetExecutingAssembly().GetName().Version;
+                version = null;
             }
             Title = "MSS6x Flasher " + version;
 
             return Title;
+        }
+
+        private static string GetConfig(string config)
+        {
+           return ConfigurationManager.AppSettings[config];
         }
     }
 
