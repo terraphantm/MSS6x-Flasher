@@ -238,7 +238,15 @@ namespace MSS6x_Flasher
         public bool IsParamSignatureValid(byte[] binary)
         {
             byte[] Signature_Injection = binary.Skip(0x104).Take(0x80).ToArray();
-            byte[] CalculatedMD5_Injection = CheckParamMD5(binary.Take(0x10000).ToArray());
+            byte[] CalculatedMD5_Injection;
+            try
+            {
+                CalculatedMD5_Injection = CheckParamMD5(binary.Take(0x10000).ToArray());
+            }
+            catch
+            {
+                return false;
+            }
             //Console.WriteLine("Calculated: " + BitConverter.ToString(CalculatedMD5_Injection));
             byte[] DecryptedMD5_Injection = DecryptSignature(Signature_Injection);
             //Console.WriteLine("Decrypted: " + BitConverter.ToString(DecryptedMD5_Injection));
@@ -246,7 +254,15 @@ namespace MSS6x_Flasher
             //Console.WriteLine(Injection_Match);
 
             byte[] Signature_Ignition = binary.Skip(0x10104).Take(0x80).ToArray();
-            byte[] CalculatedMD5_Ignition = CheckParamMD5(binary.Skip(0x10000).Take(0x10000).ToArray());
+            byte[] CalculatedMD5_Ignition;
+            try
+            {
+                CalculatedMD5_Ignition = CheckParamMD5(binary.Skip(0x10000).Take(0x10000).ToArray());
+            }
+            catch
+            {
+                return false;
+            }
             //Console.WriteLine("Calculated: " + BitConverter.ToString(CalculatedMD5_Ignition));
             byte[] DecryptedMD5_Ignition = DecryptSignature(Signature_Ignition);
             //Console.WriteLine("Decrypted: " + BitConverter.ToString(DecryptedMD5_Ignition));
@@ -258,7 +274,15 @@ namespace MSS6x_Flasher
         public bool IsProgramSignatureValid(byte[] binary)
         {
             byte[] Signature_Injection = binary.Skip(0x10104).Take(0x80).ToArray();
-            byte[] CalculatedMD5_Injection = CheckProgramMD5(binary.Take(0x280000).ToArray());
+            byte[] CalculatedMD5_Injection;
+            try
+            {
+                CalculatedMD5_Injection = CheckProgramMD5(binary.Take(0x280000).ToArray());
+            }
+            catch
+            {
+                return false;
+            }
             //Console.WriteLine("Calculated: " + BitConverter.ToString(CalculatedMD5_Injection));
             byte[] DecryptedMD5_Injection = DecryptSignature(Signature_Injection);
             //Console.WriteLine("Decrypted: " + BitConverter.ToString(DecryptedMD5_Injection));
@@ -266,7 +290,15 @@ namespace MSS6x_Flasher
             //Console.WriteLine(Injection_Match);
 
             byte[] Signature_Ignition = binary.Skip(0x290104).Take(0x80).ToArray();
-            byte[] CalculatedMD5_Ignition = CheckProgramMD5(binary.Skip(0x280000).Take(0x280000).ToArray());
+            byte[] CalculatedMD5_Ignition;
+            try
+            {
+                CalculatedMD5_Ignition = CheckProgramMD5(binary.Skip(0x280000).Take(0x280000).ToArray());
+            }
+            catch
+            {
+                return false;
+            }
             //Console.WriteLine("Calculated: " + BitConverter.ToString(CalculatedMD5_Ignition));
             byte[] DecryptedMD5_Ignition = DecryptSignature(Signature_Ignition);
             //Console.WriteLine("Decrypted: " + BitConverter.ToString(DecryptedMD5_Ignition));
