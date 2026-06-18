@@ -9,10 +9,11 @@ namespace MSS6x_Flasher
         public static string Title = SetTitle();
         public static string VIN;
         public static string HW_Ref;
-        public static uint Prog_Vers_internal_uint;
+        public static int Prog_Vers_internal_int;
         public static string ZIF;
         public static int programmingStatusByte = 0xFF;
         public static byte[] openedFlash = null;
+        public static bool[] RsaBypassStatus = null;
 
         public static string[] programmingStatusStringArray =
         {

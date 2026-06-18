@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Configuration;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -54,11 +55,13 @@ namespace MSS6x_Flasher
 
         private void ClearText_DisableButtons()
         {
+
             HWRef_Box.Content = String.Empty;
             ZIF_Box.Content = String.Empty;
             Calibration_Reference_Box.Content = String.Empty;
             programStatus_Box.Content = String.Empty;
             VIN_Box.Content = String.Empty;
+            RSAStatus_Box.Content = String.Empty;
             this.Dispatcher.BeginInvoke((Action)(() =>
             {
                 statusTextBlock.Text = String.Empty;
@@ -156,11 +159,16 @@ namespace MSS6x_Flasher
         private void  IdentDME()
         {
             string DMEType;
+            string Data_Ref;
+            string zif;
+            string programming_status;
+            int SW_version_revision_int;
+            string RSABypassStatus_string;
 
             using (EdiabasNet ediabas = StartEdiabas(ConfigurationManager.AppSettings["Port"], ConfigurationManager.AppSettings["ecuPath"], ConfigurationManager.AppSettings["defaultProgrammingSGBD"]))
             {
                 ExecuteJob(ediabas, "FLASH_PARAMETER_SETZEN", "0x12;64;64;254;Asymetrisch");
-                uint SW_version_revision_uint = 0;
+                SW_version_revision_int = 0;
                 ExecuteJob(ediabas, "aif_lesen", string.Empty);
 
                 Global.VIN = GetResult_String("AIF_FG_NR", ediabas.ResultSets);
@@ -173,8 +181,8 @@ namespace MSS6x_Flasher
                 try
                 {
                     byte[] SW_vers_interal_bytes = GetResult_ByteArray("_TEL_ANTWORT", ediabas.ResultSets).Skip(0x1f).Take(3).ToArray();
-                    Global.Prog_Vers_internal_uint = uint.Parse(SW_vers_interal_bytes[0].ToString() + SW_vers_interal_bytes[1].ToString("00"));
-                    SW_version_revision_uint = (uint)SW_vers_interal_bytes[2];
+                    Global.Prog_Vers_internal_int = int.Parse(SW_vers_interal_bytes[0].ToString() + SW_vers_interal_bytes[1].ToString("00"));
+                    SW_version_revision_int = (int)SW_vers_interal_bytes[2];
                 }
                 catch
                 {
@@ -184,14 +192,13 @@ namespace MSS6x_Flasher
 
                 ExecuteJob(ediabas, "daten_referenz_lesen", string.Empty);
 
-                string Data_Ref = GetResult_String("DATEN_REFERENZ", ediabas.ResultSets);
+                Data_Ref = GetResult_String("DATEN_REFERENZ", ediabas.ResultSets);
                 if (Data_Ref.Length > 12)
                     Data_Ref = Data_Ref.Substring(12);
 
-               
 
                 ExecuteJob(ediabas, "zif_lesen", string.Empty);
-                string zif = string.Empty;
+                zif = string.Empty;
                 if (GetResult_String("ZIF_PROGRAMM_REFERENZ", ediabas.ResultSets).Contains(Global.HW_Ref))
                     try
                     {
@@ -214,7 +221,7 @@ namespace MSS6x_Flasher
                 }
 
                 Global.ZIF = zif;
-                string programming_status = String.Empty;
+                programming_status = String.Empty;
                 ExecuteJob(ediabas, "flash_programmier_status_lesen", string.Empty);
                 byte[] programmingStatusReply = GetResult_ByteArray("_TEL_ANTWORT", ediabas.ResultSets);
                 try
@@ -241,30 +248,45 @@ namespace MSS6x_Flasher
                 if (Global.HW_Ref == "0569Q60")
                     DMEType = "MSS65";
                 else if (Global.HW_Ref == "0569QT0")
-                    DMEType = "MSS60";        
+                    DMEType = "MSS60";
                 else
                     ClearText_DisableButtons();
 
+            }
+            using (EdiabasNet ediabas = StartEdiabas(ConfigurationManager.AppSettings["Port"], ConfigurationManager.AppSettings["ecuPath"], ConfigurationManager.AppSettings["defaultSGBD"]))
+            {
+                RSABypassStatus_string = String.Empty;
+                Global.RsaBypassStatus = IsRSASegmentReadable_Bypassed(ediabas);
+
+                if (Global.RsaBypassStatus[0])
+                {
+                    if (Global.RsaBypassStatus[1])
+                        RSABypassStatus_string = "Installed";
+                    else
+                        RSABypassStatus_string = "Not Installed";
+                }
+                else
+                    RSABypassStatus_string = "Unknown";
+            }
 
                 this.Dispatcher.Invoke(() =>
                 {
                 DMEType_Box.Content = DMEType;
-                //ReadFull.IsEnabled = true;
-                //AdvancedMenu.IsEnabled = true;
-
+                    //ReadFull.IsEnabled = true;
+                    //AdvancedMenu.IsEnabled = true;
 
                 if (DMEType != String.Empty && DMEType != "Unknown / Unsuppported")
                 {
                     HWRef_Box.Content = Global.HW_Ref;
-                    if (Global.Prog_Vers_internal_uint < 1000 && Global.Prog_Vers_internal_uint >= 100)
+                    if (Global.Prog_Vers_internal_int < 1000 && Global.Prog_Vers_internal_int >= 100)
                     {
-                        if (SW_version_revision_uint != 0 && SW_version_revision_uint < 100)
+                        if (SW_version_revision_int != 0 && SW_version_revision_int < 100)
                         {
-                            ZIF_Box.Content = Global.ZIF + " (v" + Global.Prog_Vers_internal_uint + "." + SW_version_revision_uint.ToString("00") + ")";
+                            ZIF_Box.Content = Global.ZIF + " (v" + Global.Prog_Vers_internal_int + "." + SW_version_revision_int.ToString("00") + ")";
                         }
                         else
                         {
-                            ZIF_Box.Content = Global.ZIF + " (v" + Global.Prog_Vers_internal_uint + ")";
+                            ZIF_Box.Content = Global.ZIF + " (v" + Global.Prog_Vers_internal_int + ")";
                         }
                     }
                         
@@ -272,18 +294,19 @@ namespace MSS6x_Flasher
                     {
                         ZIF_Box.Content = Global.ZIF;
                     }
-                Calibration_Reference_Box.Content = Data_Ref;
-                programStatus_Box.Content = programming_status;
-                VIN_Box.Content = Global.VIN;
+                    Calibration_Reference_Box.Content = Data_Ref;
+                    programStatus_Box.Content = programming_status;
+                    VIN_Box.Content = Global.VIN;
+                    RSAStatus_Box.Content = RSABypassStatus_string;
 
-                AdvancedMenu.IsEnabled = true;
-                ReadFull_button.IsEnabled = true;
-                ReadTune_button.IsEnabled = true;
-                LoadFile_button.IsEnabled = true;
+                    AdvancedMenu.IsEnabled = true;
+                    ReadFull_button.IsEnabled = true;
+                    ReadTune_button.IsEnabled = true;
+                    LoadFile_button.IsEnabled = true;
                 }
             });
         }
-    }
+
 
 
         private void LoadFile()
@@ -416,8 +439,8 @@ namespace MSS6x_Flasher
         private byte[] Parse0pa0da(string filePath)
         {
             byte[] binary = new byte[0];
-            uint extendedLinearAddress = 0;
-            uint extendedSegmentAddress = 0;
+            int extendedLinearAddress = 0;
+            int extendedSegmentAddress = 0;
             bool eofReached = false;
             bool checksumMismatch = false;
             string ext = Path.GetExtension(filePath);
@@ -442,7 +465,7 @@ namespace MSS6x_Flasher
                 if (string.IsNullOrWhiteSpace(line) || line[0] != ':') continue;
                 string record = line.Trim();
                 int byteCount = int.Parse(record.Substring(1, 2), NumberStyles.HexNumber);
-                uint address = uint.Parse(record.Substring(3, 4), NumberStyles.HexNumber);
+                int subAddress = int.Parse(record.Substring(3, 4), NumberStyles.HexNumber);
                 int recordType = int.Parse(record.Substring(7, 2), NumberStyles.HexNumber);
                 string dataHex = record.Substring(9, byteCount * 2);
                 byte checksum = byte.Parse(record.Substring(9 + byteCount * 2, 2), NumberStyles.HexNumber);
@@ -450,7 +473,7 @@ namespace MSS6x_Flasher
                 // Validate Checksum
                 if (!ValidateIntelHexChecksum(record))
                 {
-                    Console.WriteLine("Checksum mismatch: " + record);
+                    //Debug.WriteLine("Checksum mismatch: " + record);
                     checksumMismatch = true;
                 }
 
@@ -459,45 +482,48 @@ namespace MSS6x_Flasher
                 {
                     case 0x00:
                     case 0x10: // Data Record
-                        uint baseAddress = extendedLinearAddress + extendedSegmentAddress;
+                        int IntelHexBaseAddress = extendedLinearAddress + extendedSegmentAddress;
+                        int arrayBaseAddress = 0;
                         if (ext == ".0pa" || ext == ".paf")
                         {
-                            if (baseAddress < 0x70000) ;
-                            else if (baseAddress >= 0x400000 && baseAddress < 0x600000)
-                                baseAddress -= 0x380000;
-                            else if (baseAddress >= 0x800000 && baseAddress < 0x870000)
-                                baseAddress -= 0x580000;
-                            else if (baseAddress > 0xC00000 && baseAddress < 0xE00000)
-                                baseAddress -= 0x900000;
+                            if (IntelHexBaseAddress < 0x70000)
+                                arrayBaseAddress = IntelHexBaseAddress;
+                            else if (IntelHexBaseAddress >= 0x400000 && IntelHexBaseAddress < 0x600000)
+                                arrayBaseAddress = IntelHexBaseAddress - 0x380000;
+                            else if (IntelHexBaseAddress >= 0x800000 && IntelHexBaseAddress < 0x870000)
+                                arrayBaseAddress = IntelHexBaseAddress - 0x580000;
+                            else if (IntelHexBaseAddress > 0xC00000 && IntelHexBaseAddress < 0xE00000)
+                                arrayBaseAddress = IntelHexBaseAddress - 0x900000;
                             else
                                 return null;
                         }
                         else if (ext == ".0da" || ext == ".daf")
                         {
-                            if (baseAddress >= 0x70000 && baseAddress < 0x80000)
-                                baseAddress -= 0x70000;
-                            else if (baseAddress >= 0x870000 && baseAddress < 0x880000)
-                                baseAddress -= 0x860000;
-                            else if (baseAddress == 0) ;
+                            if (IntelHexBaseAddress == 0)
+                                arrayBaseAddress = IntelHexBaseAddress;
+                            else if (IntelHexBaseAddress >= 0x70000 && IntelHexBaseAddress < 0x80000)
+                                arrayBaseAddress = IntelHexBaseAddress - 0x70000;
+                            else if (IntelHexBaseAddress >= 0x870000 && IntelHexBaseAddress < 0x880000)
+                                arrayBaseAddress = IntelHexBaseAddress - 0x860000;
                             else
                                 return null;
                         }
-                        uint currentRecordAddress = baseAddress + address;
+                        int currentAddress = arrayBaseAddress + subAddress;
                         for (int i = 0; i < byteCount; i++)
                         {
                             byte dataByte = byte.Parse(dataHex.Substring(i * 2, 2), NumberStyles.HexNumber);
-                            binary[currentRecordAddress + (uint)i] = dataByte;
+                            binary[currentAddress + i] = dataByte;
                         }
                         break;
                     case 0x01: // End of File
                         eofReached = true;
                         break;
                     case 0x02: // Extended Segment Address
-                        extendedSegmentAddress = uint.Parse(dataHex, NumberStyles.HexNumber) << 4;
+                        extendedSegmentAddress = int.Parse(dataHex, NumberStyles.HexNumber) << 4;
                         extendedLinearAddress = 0; // Type 02 and 04 are exclusive
                         break;
                     case 0x04: // Extended Linear Address
-                        extendedLinearAddress = uint.Parse(dataHex, NumberStyles.HexNumber) << 16;
+                        extendedLinearAddress = int.Parse(dataHex, NumberStyles.HexNumber) << 16;
                         extendedSegmentAddress = 0;
                         break;
                 }
@@ -513,7 +539,7 @@ namespace MSS6x_Flasher
             }
         }
 
-        private bool ValidateIntelHexChecksum(string line)
+        private static bool ValidateIntelHexChecksum(string line)
         {
             byte sum = 0;
             for (int i = 1; i < line.Length - 2; i += 2)
@@ -529,6 +555,7 @@ namespace MSS6x_Flasher
         {
             bool fileValid = false;
             int programmingStatusByte = Global.programmingStatusByte;
+            string zifFromDME = Global.ZIF;
 
             if (file.Length == 0x20000)
             {
@@ -539,7 +566,7 @@ namespace MSS6x_Flasher
                     programmingStatusByte == 6 || programmingStatusByte == 13 || 
                     programmingStatusByte == 14 || programmingStatusByte == 15);
 
-                if (VerifyCalibrationMatch(file, Global.ZIF) && (allowTuneFlash))
+                if (VerifyCalibrationMatch(file, zifFromDME) && (allowTuneFlash))
                 {
                     fileValid = true;
                     //Global.openedFlash = file;
@@ -570,14 +597,14 @@ namespace MSS6x_Flasher
                 {        
                     Checksums_Signatures ChecksumsSignatures = new Checksums_Signatures();
                     FullBinIsLoaded(this, null);
-                    FlashProgram_button.IsEnabled = true;
-                    RSA_Bypass.IsEnabled = true;
                     string binref1 = System.Text.Encoding.ASCII.GetString(file.Skip(0x10248).Take(0x24).ToArray());
-                    string zif = binref1.Substring(7, 5);
-                    if (VerifyCalibrationMatch(file.Skip(0x70000).Take(0x10000).Concat(file.Skip(0x70000 + 0x280000).Take(0x10000)).ToArray(), zif))
+                    string zifFromFile = binref1.Substring(7, 5);
+                    if (VerifyCalibrationMatch(file.Skip(0x70000).Take(0x10000).Concat(file.Skip(0x70000 + 0x280000).Take(0x10000)).ToArray(), zifFromFile))
                     {
                         fileValid = true;
-                        if (VerifyCalibrationMatch(file.Skip(0x70000).Take(0x10000).Concat(file.Skip(0x70000 + 0x280000).Take(0x10000)).ToArray(), Global.ZIF))
+                        FlashProgram_button.IsEnabled = true;
+                        RSA_Bypass.IsEnabled = true;
+                        if (VerifyCalibrationMatch(file.Skip(0x70000).Take(0x10000).Concat(file.Skip(0x70000 + 0x280000).Take(0x10000)).ToArray(), zifFromDME))
                         {
                             FlashTune_button.IsEnabled = true;
                         }
@@ -618,12 +645,13 @@ namespace MSS6x_Flasher
 
         private bool VerifyCalibrationMatch(byte[] flash, string zif)
         {
+            string HW_Ref = Global.HW_Ref;
             bool match = false;
             byte[] binheader1 = flash.Take(0x8).ToArray();
             byte[] binheader2 = flash.Skip(0x10000).Take(0x8).ToArray();
             byte[] binheadercompare = { 0x5A, 0x5A, 0x5A, 0x5A, 0xCC, 0xCC, 0xCC, 0xCC };
-            //Console.WriteLine(BitConverter.ToString(binheader1));
-            //Console.WriteLine(BitConverter.ToString(binheader2));
+            //Debug.WriteLine(BitConverter.ToString(binheader1));
+            //Debug.WriteLine(BitConverter.ToString(binheader2));
 
             string binref1 = System.Text.Encoding.ASCII.GetString(flash.Skip(0x256).Take(0x37).ToArray());
             string binref2 = System.Text.Encoding.ASCII.GetString(flash.Skip(0x10256).Take(0x37).ToArray());
@@ -637,7 +665,7 @@ namespace MSS6x_Flasher
                 });
                 return match;
             }
-            if (!binref1.Contains(Global.HW_Ref))
+            if (!binref1.Contains(HW_Ref))
             {
                 this.Dispatcher.Invoke(() =>
                 {
@@ -646,13 +674,13 @@ namespace MSS6x_Flasher
                 return match;
             }
 
-            zif = "*" + zif.Substring(0,3) + "??" /*+ zif.Substring(4)*/
+            zif = "*" + zif.Substring(0,3) + "??" /*+ zifFromFile.Substring(4)*/
                 +"*";
-            //Console.WriteLine(zif);
+            //Debug.WriteLine(zifFromFile);
 
             //Z241E
-            //Console.WriteLine(zif);
-            //Console.WriteLine(binref1);
+            //Debug.WriteLine(zifFromFile);
+            //Debug.WriteLine(binref1);
             if (!Regex.IsMatch(binref1, WildCardToRegular(zif)))
             {
                 this.Dispatcher.Invoke(() =>
@@ -686,14 +714,15 @@ namespace MSS6x_Flasher
 
         private bool VerifyProgramMatch(byte[] flash)
         {
+            string HW_Ref = Global.HW_Ref;
             bool match = false;
 
             byte[] binheader1 = flash.Skip(0x10000).Take(0x8).ToArray();
             byte[] binheader2 = flash.Skip(0x290000).Take(0x8).ToArray();
             byte[] binheadercompare = { 0x5A, 0x5A, 0x5A, 0x5A, 0x33, 0x33, 0x33, 0x33 };
 
-            uint flashExtEnd_Inj = BitConverter.ToUInt32(flash.Skip(0x1001c).Take(4).Reverse().ToArray(), 0);
-            uint flashExtEnd_Ign = BitConverter.ToUInt32(flash.Skip(0x29001c).Take(4).Reverse().ToArray(), 0);
+            int flashExtEnd_Inj = BitConverter.ToInt32(flash.Skip(0x1001c).Take(4).Reverse().ToArray(), 0);
+            int flashExtEnd_Ign = BitConverter.ToInt32(flash.Skip(0x29001c).Take(4).Reverse().ToArray(), 0);
 
 
 
@@ -726,7 +755,7 @@ namespace MSS6x_Flasher
                 return match;
             }
 
-            if (!binref1.Contains(Global.HW_Ref))
+            if (!binref1.Contains(HW_Ref))
             {
                 this.Dispatcher.Invoke(() =>
                 {
@@ -746,7 +775,7 @@ namespace MSS6x_Flasher
             return match;
         }
 
-        private void UpdateProgressBar(uint progress)
+        private void UpdateProgressBar(int progress)
         {
             ProgressDME.Dispatcher.Invoke(() => ProgressDME.Value = progress, System.Windows.Threading.DispatcherPriority.Background);
         }
@@ -792,6 +821,10 @@ namespace MSS6x_Flasher
                 programmingStatusByte == 6 || programmingStatusByte == 8 ||
                 programmingStatusByte == 13 || programmingStatusByte == 14 ||
                 programmingStatusByte == 15);
+
+            bool[] RSABypassArray = Global.RsaBypassStatus;
+            bool RSABypassReadable = RSABypassArray[0];
+            bool RSABypassInstalled = RSABypassArray[1];
 
             using (EdiabasNet ediabas = StartEdiabas(ConfigurationManager.AppSettings["Port"], ConfigurationManager.AppSettings["ecuPath"], ConfigurationManager.AppSettings["defaultSGBD"]))
             {
@@ -843,7 +876,7 @@ namespace MSS6x_Flasher
                     return;
                 }
 
-                if (IsRSASegmentReadable_Bypassed(ediabas)[1])
+                if (RSABypassInstalled)
                 {
                     msg = "RSA bypass already present, repeating the step should not be necessary. Do you wish to continue anyway?";
 
@@ -854,7 +887,9 @@ namespace MSS6x_Flasher
 
                 }
 
-                //The only time this should break is if someone signs a modified file and tries flashing that. If we do ever get the private key then we'd be removing this routine anyway
+                //This will probably break things if a DME has an invalid signature but still enforces signature checks (i.e deliberately messing with the patching code here or flashing such a thing over BDM)
+                //If that's the case... the user probably knows what they did and should know how to recover
+                //For stock DMEs this code should work ok
                 if (!IsSigValid)
                 {
                     byte[] injection_signature = ReadMemory(ediabas, 0x10100, 0x10183, String.Empty);
@@ -869,7 +904,7 @@ namespace MSS6x_Flasher
 
             }
 
-            msg = "Please ensure you are using a reliable cable (EdiabasLib firmware strongly recommended) and a stable power supply before continuing.\n\nContinue?";
+            msg = "You are about to flash an RSA Bypass. Please ensure you are using a reliable cable (EdiabasLib firmware strongly recommended) and a stable power supply before continuing.\n\nWould you like to continue?";
             result = MessageBox.Show(msg, "RSA Bypass", MessageBoxButton.YesNo, MessageBoxImage.Warning);
             if (result == MessageBoxResult.No)
                 return;
@@ -920,8 +955,8 @@ namespace MSS6x_Flasher
             }
             if (result == true)
             {
-                uint start = 0x3F8000;
-                uint end = 0x3fffff;
+                int start = 0x3F8000;
+                int end = 0x3fffff;
                 byte[] Injection = new byte[0];
                 byte[] Ignition = new byte[0];
                 string ReadingText = String.Empty;
@@ -952,7 +987,7 @@ namespace MSS6x_Flasher
 
                         String vers = Global.ZIF;
                         if (vers[0] == 'Z')
-                            vers = vers.Substring(1) + "(v" + Global.Prog_Vers_internal_uint.ToString() + ")";
+                            vers = vers.Substring(1) + "(v" + Global.Prog_Vers_internal_int.ToString() + ")";
 
                         string datetime = DateTime.Now.ToString("yyyyMMddHHmm");
 
@@ -1011,8 +1046,8 @@ namespace MSS6x_Flasher
             }
             if (result == true)
             {
-                uint InjectionEnd = 0;
-                uint IgnitionEnd = 0;
+                int InjectionEnd = 0;
+                int IgnitionEnd = 0;
                 byte[] Injection = new byte[0];
                 byte[] Ignition = new byte[0];
                 string ReadingText = String.Empty;
@@ -1037,7 +1072,7 @@ namespace MSS6x_Flasher
                     await Task.Run(() => InjectionEndBytes = ReadMemory(ediabas, 0x7001C, 0x7001F, String.Empty));
                     await Task.Run(() => IgnitionEndBytes = ReadMemory(ediabas, 0x87001C, 0x87001F, String.Empty));
 
-                    InjectionEnd = BitConverter.ToUInt32(InjectionEndBytes.Reverse().ToArray(), 0) + 16;
+                    InjectionEnd = BitConverter.ToInt32(InjectionEndBytes.Reverse().ToArray(), 0) + 16;
                     if (InjectionEnd < 0x70000 || InjectionEnd >= 0x7FFFC)
                         InjectionEnd = 0x7FFFF;
                     ReadingText = "Reading Injection Tune";
@@ -1054,7 +1089,7 @@ namespace MSS6x_Flasher
                         Injection = Injection.Concat(Checksum).ToArray();
                     }
 
-                    IgnitionEnd = BitConverter.ToUInt32(IgnitionEndBytes.Reverse().ToArray(), 0) + 0x800000 + 16;
+                    IgnitionEnd = BitConverter.ToInt32(IgnitionEndBytes.Reverse().ToArray(), 0) + 0x800000 + 16;
                     if (IgnitionEnd < 0x870000 || IgnitionEnd >= 0x87FFFC)
                         IgnitionEnd = 0x87FFFF;
                     ReadingText = "Reading Ignition Tune";
@@ -1082,7 +1117,7 @@ namespace MSS6x_Flasher
                     String VIN = Global.VIN;
                     String vers = Global.ZIF;
                     if (vers[0] == 'Z')
-                        vers = vers.Substring(1) + "(v" + Global.Prog_Vers_internal_uint.ToString() + ")";
+                        vers = vers.Substring(1) + "(v" + Global.Prog_Vers_internal_int.ToString() + ")";
 
                     string datetime = DateTime.Now.ToString("yyyyMMddHHmm");
 
@@ -1133,8 +1168,8 @@ namespace MSS6x_Flasher
             }
             if (result == true)
             {
-                uint start = 0;
-                uint end = 0;
+                int start = 0;
+                int end = 0;
                 byte[] Injection = new byte[0];
                 byte[] Ignition = new byte[0];
 
@@ -1180,8 +1215,8 @@ namespace MSS6x_Flasher
 
                         ReadingText = "Reading Injection External Flash";
                         start = 0x430000;
-                        end = BitConverter.ToUInt32(Injection.Skip(0x1001c).Take(4).Reverse().ToArray(), 0) + 7;
-                        //Console.WriteLine(end);
+                        end = BitConverter.ToInt32(Injection.Skip(0x1001c).Take(4).Reverse().ToArray(), 0) + 7;
+                        //Debug.WriteLine(end);
                         await Task.Run(() => Injection_ext = ReadMemory(ediabas, start, end, ReadingText));
                         Injection_ext = Injection_ext_start.Concat(Injection_ext).ToArray();
 
@@ -1219,8 +1254,8 @@ namespace MSS6x_Flasher
 
                         ReadingText = "Reading Ignition External Flash";
                         start = 0xC30000;
-                        end = BitConverter.ToUInt32(Ignition.Skip(0x1001c).Take(4).Reverse().ToArray(), 0) + 7 + 0x800000;
-                        //Console.WriteLine(end);
+                        end = BitConverter.ToInt32(Ignition.Skip(0x1001c).Take(4).Reverse().ToArray(), 0) + 7 + 0x800000;
+                        //Debug.WriteLine(end);
 
                         await Task.Run(() => Ignition_ext = ReadMemory(ediabas, start, end, ReadingText));
                         Ignition_ext = Ignition_ext_start.Concat(Ignition_ext).ToArray();
@@ -1255,7 +1290,7 @@ namespace MSS6x_Flasher
                             {
                                 this.Dispatcher.Invoke(() =>
                                 {
-                                    statusTextBlock.Text = "Could not find secret key";
+                                    statusTextBlock.Text = "Could not find EWS4 SK";
                                 });
                             }
                             else
@@ -1279,7 +1314,7 @@ namespace MSS6x_Flasher
                     string vers = Global.ZIF;
 
                     if (vers[0] == 'Z')
-                        vers = vers.Substring(1) + "_v" + Global.Prog_Vers_internal_uint.ToString();
+                        vers = vers.Substring(1) + "_v" + Global.Prog_Vers_internal_int.ToString();
 
                     if (VIN == "")
                     {
@@ -1331,13 +1366,13 @@ namespace MSS6x_Flasher
 
         }
 
-        private int FindSK(byte[] buffer)
+        private static int FindSK(byte[] buffer)
         {
-            var KeyLength = 0x10;
-            var SearchLimit = buffer.Length - (3 * KeyLength);
-            for (var i = 0; i < SearchLimit; ++i)
+            int KeyLength = 0x10;
+            int SearchLimit = buffer.Length - (3 * KeyLength);
+            for (int i = 0; i < SearchLimit; ++i)
             {
-                var k = 0;
+                int k = 0;
                 for (; k < KeyLength; k++)
                 {
                     if ((buffer[i+k] ^ 0xFF) != buffer[i + k + KeyLength] && (buffer[i+k] ^ 0xAA) != buffer[i+k+KeyLength*2])
@@ -1351,72 +1386,72 @@ namespace MSS6x_Flasher
 
         private async Task ReadISN_SK()
         {
-            OpenFolderDialog openFolder = new OpenFolderDialog();
-            try
-            {
-                openFolder.InitialDirectory = System.IO.Path.GetFullPath(ConfigurationManager.AppSettings["HomeDirectory"]);
-            }
-            catch
-            {
-                openFolder.InitialDirectory = System.IO.Path.GetDirectoryName(System.AppDomain.CurrentDomain.BaseDirectory);
-            }
-            openFolder.Title = "Select Save Directory";
-            Nullable<bool> result;
-            try
-            {
-                result = openFolder.ShowDialog();
-            }
-            catch
-            {
-                openFolder.InitialDirectory = System.IO.Path.GetDirectoryName(System.AppDomain.CurrentDomain.BaseDirectory);
-                result = openFolder.ShowDialog();
-            }
-            if (result == true)
-            {
-                uint start = 0x3f8000;
-                uint end = 0x3fffff;
-                byte[] InjRAMDump = new byte[0];
-                byte[] ISN = new byte[0];
-                byte[] ProtectedRead = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 
-                byte[] EWS4_SK_Header = { 0xA5, 0x00, 0xFF, 0xAA, 0xFF, 0xFF, 0xFF, 0xFF };
-                byte[] EWS4_SK = new byte[0];
+            int start = 0x3f8000;
+            int end = 0x3fffff;
+            byte[] InjRAMDump = new byte[0];
+            byte[] ISN = new byte[0];
+            byte[] ProtectedRead = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 
-                using (EdiabasNet ediabas = StartEdiabas(ConfigurationManager.AppSettings["Port"], ConfigurationManager.AppSettings["ecuPath"], ConfigurationManager.AppSettings["defaultSGBD"]))
+            byte[] EWS4_SK_Header = { 0xA5, 0x00, 0xFF, 0xAA, 0xFF, 0xFF, 0xFF, 0xFF };
+            byte[] EWS4_SK = new byte[0];
+
+            using (EdiabasNet ediabas = StartEdiabas(ConfigurationManager.AppSettings["Port"], ConfigurationManager.AppSettings["ecuPath"], ConfigurationManager.AppSettings["defaultSGBD"]))
+            {
+                DisableButtons(this, null);
+                String ReadingText = String.Empty;
+                if (Global.HW_Ref == "0569Q60")
                 {
-                    DisableButtons(this, null);
-                    String ReadingText = String.Empty;
-                    if (Global.HW_Ref == "0569Q60")
+                    ReadingText = String.Empty;
+                    await Task.Run(() => ISN = ReadMemory(ediabas, 0x7940, 0x7945, ReadingText));
+                    if (ISN.SequenceEqual(ProtectedRead))
                     {
-                        ReadingText = String.Empty;
-                        await Task.Run(() => ISN = ReadMemory(ediabas, 0x7940, 0x7945, ReadingText));
-                        if (ISN.SequenceEqual(ProtectedRead))
-                        {
-                            this.Dispatcher.Invoke(() =>
-                            {
-                                statusTextBlock.Text = "ISN is empty or protected. Please flash RSA bypass to read ISN";
-                            });
-                            ReenableButtons(this, null);
-                            return;
-                        }
-                        byte[] CASISN = { ISN[2], ISN[1] };
                         this.Dispatcher.Invoke(() =>
                         {
-                            statusTextBlock.Text = "CAS ISN: " + BitConverter.ToString(CASISN) + "\nDME ISN: " + BitConverter.ToString(ISN);                           
+                            statusTextBlock.Text = "ISN is empty or protected. Please flash RSA bypass to read ISN";
                         });
+                        ReenableButtons(this, null);
+                        return;
+                    }
+                    byte[] CASISN = { ISN[2], ISN[1] };
+                    this.Dispatcher.Invoke(() =>
+                    {
+                        statusTextBlock.Text = "CAS ISN: " + Convert.ToHexString(CASISN) + "\nDME ISN: " + Convert.ToHexString(ISN);
+                    });
 
-                        String VIN = Global.VIN;
-                        if (VIN == "")
-                        {
-                            VIN = "AA00000";
-                        }
-
+                    String VIN = Global.VIN;
+                    if (VIN == "")
+                    {
+                        VIN = "AA00000";
+                    }
+                    OpenFolderDialog openFolder = new OpenFolderDialog();
+                    try
+                    {
+                        openFolder.InitialDirectory = System.IO.Path.GetFullPath(ConfigurationManager.AppSettings["HomeDirectory"]);
+                    }
+                    catch
+                    {
+                        openFolder.InitialDirectory = System.IO.Path.GetDirectoryName(System.AppDomain.CurrentDomain.BaseDirectory);
+                    }
+                    openFolder.Title = "Select Save Directory";
+                    Nullable<bool> result;
+                    try
+                    {
+                        result = openFolder.ShowDialog();
+                    }
+                    catch
+                    {
+                        openFolder.InitialDirectory = System.IO.Path.GetDirectoryName(System.AppDomain.CurrentDomain.BaseDirectory);
+                        result = openFolder.ShowDialog();
+                    }
+                    if (result == true)
+                    {
                         DirectoryInfo SaveDirectory = Directory.CreateDirectory(openFolder.FolderName + @"\" + VIN);
                         SaveFileDialog saveFile = new SaveFileDialog();
                         {
                             saveFile.FileName = "ISN";
                             saveFile.InitialDirectory = SaveDirectory.FullName;
-                            //Console.WriteLine(saveFile.InitialDirectory);
+                            //Debug.WriteLine(saveFile.InitialDirectory);
                             saveFile.Filter = "Binary|*.bin|Original File|*.ori|All Files|*.*";
                             try
                             {
@@ -1426,73 +1461,87 @@ namespace MSS6x_Flasher
                             }
                             catch (Exception)
                             {
-                                //Console.WriteLine("Exception caught in process: {0}", ex);
+                                //Debug.WriteLine("Exception caught in process: {0}", ex);
                                 MessageBox.Show("Error trying to save file");
                             }
 
                         }
                     }
+                }
 
-                    if (Global.HW_Ref == "0569QT0")
+                if (Global.HW_Ref == "0569QT0")
+                {
+                    ReadingText = String.Empty;
+                    await Task.Run(() => EWS4_SK = ReadMemory(ediabas, 0x7948, 0x797F, ReadingText));
+
+                    if (!EWS4_SK.Take(0x8).ToArray().SequenceEqual(EWS4_SK_Header))
                     {
-                        ReadingText = String.Empty;
-                        await Task.Run(() => EWS4_SK = ReadMemory(ediabas, 0x7948, 0x797F, ReadingText));
+                        /* This seems to work on most MSS60 variants from 060E onwards. Does not work on prototye v530 -- because it's still using EWS3
+                            * Some reports of the method failing on 060E and 080E, but I haven't encountered that. 
+                            * Perhaps earlier software versions cleared from RAM after authentication succeeded? (which wouldn't happen on the bench)
+                            */
 
-                        if (EWS4_SK.Take(0x8).ToArray().SequenceEqual(EWS4_SK_Header))
+                        ReadingText = "Reading RAM";
+
+                        await Task.Run(() => InjRAMDump = ReadMemory(ediabas, start, end, ReadingText));
+
+
+                        this.Dispatcher.Invoke(() =>
+                        {
+                            statusTextBlock.Text = "Searching for secret key";
+                        });
+
+                        int IndexOfSK = FindSK(InjRAMDump);
+                        if (IndexOfSK == -1)
                         {
                             this.Dispatcher.Invoke(() =>
                             {
-                                statusTextBlock.Text = "Secret Key: " + BitConverter.ToString(EWS4_SK.Skip(0x8).Take(0x10).ToArray());
+                                statusTextBlock.Text = "Could not find secret key";
                             });
+                            ReenableButtons(this, null);
+                            return;
                         }
 
                         else
                         {
-                            /* This seems to work on most MSS60 variants from 060E onwards. Does not work on prototye v530 -- because it's still using EWS3
-                             * Some reports of the method failing on 060E and 080E, but I haven't encountered that. 
-                             * Perhaps earlier software versions cleared from RAM after authentication succeeded? (which wouldn't happen on the bench)
-                             */
-
-                            ReadingText = "Reading RAM";
-
-                            await Task.Run(() => InjRAMDump = ReadMemory(ediabas, start, end, ReadingText));
-
-
-                            this.Dispatcher.Invoke(() =>
-                            {
-                                statusTextBlock.Text = "Searching for secret key";
-                            });
-
-                            int IndexOfSK = FindSK(InjRAMDump);
-                            if (IndexOfSK == -1)
-                            {
-                                this.Dispatcher.Invoke(() =>
-                                {
-                                    statusTextBlock.Text = "Could not find secret key";
-                                });
-                                ReenableButtons(this, null);
-                                return;
-                            }
-
-                            else
-                            {
-                                byte[] SK = InjRAMDump.Skip(IndexOfSK).Take(0x30).ToArray();
-                                this.Dispatcher.Invoke(() =>
-                                {
-                                    statusTextBlock.Text = "Secret Key: " + BitConverter.ToString(SK.Take(0x10).ToArray());
-                                    //Console.WriteLine("Secret Key Found @" + (IndexOfSK.ToString("x")));
-                                });
-                                EWS4_SK = EWS4_SK_Header.Concat(SK).ToArray();
-                            }
-
-
+                            byte[] SK = InjRAMDump.Skip(IndexOfSK).Take(0x30).ToArray();
+                            EWS4_SK = EWS4_SK_Header.Concat(SK).ToArray();
                         }
-                        String VIN = Global.VIN;
-                        if (VIN == "")
-                        {
-                            VIN = "AA00000";
-                        }
-                        DirectoryInfo SaveDirectory = Directory.CreateDirectory(VIN);
+                    }
+                    this.Dispatcher.Invoke(() =>
+                    {
+                        statusTextBlock.Text = "EWS4 SK:\n" + BitConverter.ToString(EWS4_SK.Skip(0x8).Take(0x10).ToArray()).Replace('-', ' ');
+                    });
+
+                    String VIN = Global.VIN;
+                    if (VIN == "")
+                    {
+                        VIN = "AA00000";
+                    }
+
+                    OpenFolderDialog openFolder = new OpenFolderDialog();
+                    try
+                    {
+                        openFolder.InitialDirectory = System.IO.Path.GetFullPath(ConfigurationManager.AppSettings["HomeDirectory"]);
+                    }
+                    catch
+                    {
+                        openFolder.InitialDirectory = System.IO.Path.GetDirectoryName(System.AppDomain.CurrentDomain.BaseDirectory);
+                    }
+                    openFolder.Title = "Select Save Directory";
+                    Nullable<bool> result;
+                    try
+                    {
+                        result = openFolder.ShowDialog();
+                    }
+                    catch
+                    {
+                        openFolder.InitialDirectory = System.IO.Path.GetDirectoryName(System.AppDomain.CurrentDomain.BaseDirectory);
+                        result = openFolder.ShowDialog();
+                    }
+                    if (result == true)
+                    {
+                        DirectoryInfo SaveDirectory = Directory.CreateDirectory(openFolder.FolderName + @"\" + VIN);
                         SaveFileDialog saveFile = new SaveFileDialog();
                         {
                             saveFile.FileName = "EWS4_SK";
@@ -1506,7 +1555,7 @@ namespace MSS6x_Flasher
                             }
                             catch (Exception)
                             {
-                                //Console.WriteLine("Exception caught in process: {0}", ex);
+                                //Debug.WriteLine("Exception caught in process: {0}", ex);
                                 MessageBox.Show("Error trying to save file");
                             }
                         }
@@ -1516,21 +1565,21 @@ namespace MSS6x_Flasher
             }
         }
     
-        private byte[] ReadMemory(EdiabasNet ediabas, uint start, uint end, string ReadingText)
+        private byte[] ReadMemory(EdiabasNet ediabas, int start, int end, string ReadingText)
         {
             SetThreadExecutionState(EXECUTION_STATE.ES_CONTINUOUS | EXECUTION_STATE.ES_SYSTEM_REQUIRED | EXECUTION_STATE.ES_AWAYMODE_REQUIRED);
 
             byte[] MemoryDump = { };
             byte[] MemoryRead = { };
             byte[] Result = { };
-            uint length = end - start + 1;
-            uint lengthRemaining = length;
-            uint segLength = 0x63;
+            int length = end - start + 1;
+            int lengthRemaining = length;
+            int segLength = 0x63;
             if (start < 0x800000)
                 segLength = 0x64;
-            uint bytesRead = 0;
+            int bytesRead = 0;
 
-            //Console.WriteLine(Start.ToString("x"));
+            //Debug.WriteLine(Start.ToString("x"));
 
             while (bytesRead < length)
             {
@@ -1560,7 +1609,7 @@ namespace MSS6x_Flasher
 
                 if (length > 255)
                 {
-                    uint progress = bytesRead * 4096 / length;
+                    int progress = bytesRead * 4096 / length;
                     UpdateProgressBar(progress);
                 }
 
@@ -1575,7 +1624,7 @@ namespace MSS6x_Flasher
         private bool[] IsRSASegmentReadable_Bypassed(EdiabasNet ediabas)
         {
             bool[] RSABypassStatus = { true, true }; //RSAbypassed[0] == Readable, [1] = Bypassed
-            uint RSASegmentsLocation = 0x10204;
+            int RSASegmentsLocation = 0x10204;
 
             byte[] StockRSASegments = 
             {
@@ -1610,7 +1659,6 @@ namespace MSS6x_Flasher
 
             if (StockRSASegments.SequenceEqual(rsa_segments_injection) || StockRSASegments.SequenceEqual(rsa_segments_ignition))
                 RSABypassStatus[1] = false;
-
 
             return RSABypassStatus;
         }
@@ -1647,14 +1695,18 @@ namespace MSS6x_Flasher
             return binary;
         }
 
-        private async Task<bool> FlashDME_Data(byte[] tune)
+        private async Task<bool> FlashDME_Data(byte[] tune, bool AfterProgram = false)
         {
             Checksums_Signatures ChecksumsSignatures = new Checksums_Signatures();
-            
+
+            string DMEType = Global.HW_Ref;
+            int ProgramVersionInternal = Global.Prog_Vers_internal_int;
+            bool[] RSABypassArray = Global.RsaBypassStatus;
+            bool RSABypassReadable = RSABypassArray[0];
+            bool RSABypassInstalled = RSABypassArray[1];
+
             bool success = true;
             bool IsSigValid =  ChecksumsSignatures.IsParamSignatureValid(tune);
-            bool RSABypassInstalled = false;
-            bool RSABypassReadable = false;
             bool affe0815_bypass_possible = false;
             bool affe0815_bypass_written = false;
             bool pseudoRSABypass = false;
@@ -1665,14 +1717,16 @@ namespace MSS6x_Flasher
             byte[] injection = tune.Take(0x10000).ToArray();
             byte[] ignition = tune.Skip(0x10000).Take(0x10000).ToArray();
             pseudoRSABypass = IsPsuedoRSABypassPresent(injection, ignition);
-            
+
+
+
 
 
 
             //This hack to bypass RSA seems to work on any MSS65 and MSS60s 140E (657) and older.
             //Todo: Confirm whether there are any software variants between 140E and 170E, and if so if any of them can take advantage of this trick.
             //For now software newer than 140E / v657 will be assumed to require a true RSA bypass -- however I suspect anything older than v700 would work
-            if ((Global.HW_Ref == "0569Q60" || (Global.HW_Ref == "0569QT0" && (Global.Prog_Vers_internal_uint <= 657))))
+            if ((DMEType == "0569Q60" || (DMEType == "0569QT0" && (ProgramVersionInternal <= 657))))
             {
                 affe0815_bypass_possible = true;
                 
@@ -1682,13 +1736,6 @@ namespace MSS6x_Flasher
                 affe0815_patch[3] = 0x15;
             }
 
-
-            using (EdiabasNet ediabas = StartEdiabas(ConfigurationManager.AppSettings["Port"], ConfigurationManager.AppSettings["ecuPath"], ConfigurationManager.AppSettings["defaultSGBD"]))
-            {
-                bool[] RSABypassArray = IsRSASegmentReadable_Bypassed(ediabas);
-                RSABypassReadable = RSABypassArray[0];
-                RSABypassInstalled = RSABypassArray[1];
-            }
             if (!IsSigValid && !RSABypassInstalled && !affe0815_bypass_possible && !pseudoRSABypass)
             {
                 string msg = String.Empty;
@@ -1713,11 +1760,24 @@ namespace MSS6x_Flasher
                     ReenableButtons(this, null);
                     return false;
                 }
+                RSABypassInstalled = true;
+            }
+            else if (!AfterProgram)
+            {
+                string msg = "You are about to flash a tune. Please ensure you have a reliable cable.\n\nWould you like to continue?";
+
+                MessageBoxResult result = MessageBox.Show(msg, "Flash tune?", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+                if (result == MessageBoxResult.No)
+                {
+                    this.Dispatcher.Invoke(() =>
+                    {
+                        statusTextBlock.Text = "Tune write cancelled";
+                    });
+                    ReenableButtons(this, null);
+                    return false;
+                }
             }
             
-
-
-
             using (EdiabasNet ediabas = StartEdiabas(ConfigurationManager.AppSettings["Port"], ConfigurationManager.AppSettings["ecuPath"],  ConfigurationManager.AppSettings["defaultProgrammingSGBD"]))
             {
                 DisableButtons(this, null);
@@ -1725,7 +1785,7 @@ namespace MSS6x_Flasher
                 {
                     if (!ExecuteJob(ediabas, "FLASH_PARAMETER_SETZEN", "0x12;64;64;254;Asymetrisch")) 
                     {
-                        //Console.WriteLine("Failed to set DME Flash Parameters");
+                        //Debug.WriteLine("Failed to set DME Flash Parameters");
                     }
   
                     if (!RequestSecurityAccess(ediabas))
@@ -1738,10 +1798,10 @@ namespace MSS6x_Flasher
                     }
                 });
 
-                uint eraseStart = 0x70000;
-                uint eraseBlock = 0x1;
-                uint flashStart = 0x70000;
-                uint IgnitionOffset = 0x800000;
+                int eraseStart = 0x70000;
+                int eraseBlock = 0x1;
+                int flashStart = 0x70000;
+                int IgnitionOffset = 0x800000;
 
 
                 if (pseudoRSABypass || IsSigValid)
@@ -1760,11 +1820,11 @@ namespace MSS6x_Flasher
                     ignition = ChecksumsSignatures.CorrectParameterChecksums(ignition);
                 }
 
-                uint flashEndInj = BitConverter.ToUInt32(injection.Skip(0x1c).Take(4).Reverse().ToArray(), 0) + 16; //taking extra bytes in case parameters go a little past (like some MSS65)
+                int flashEndInj = BitConverter.ToInt32(injection.Skip(0x1c).Take(4).Reverse().ToArray(), 0) + 64; //taking extra bytes in case parameters go a little past (like some MSS65)
                 if (flashEndInj < 0x70000 || flashEndInj >= 0x7FFFC)
                     flashEndInj = 0x7FFFF;
 
-                uint flashEndIgn = BitConverter.ToUInt32(ignition.Skip(0x1c).Take(4).Reverse().ToArray(), 0) + 16;
+                int flashEndIgn = BitConverter.ToInt32(ignition.Skip(0x1c).Take(4).Reverse().ToArray(), 0) + 64;
                 if (flashEndIgn < 0x70000 || flashEndIgn >= 0x7FFFC)
                     flashEndIgn = 0x7FFFF;
 
@@ -1809,10 +1869,13 @@ namespace MSS6x_Flasher
                     if (success)
                     await Task.Run(() => success = FlashBlock(ediabas, ignition.Skip(0xFFFC).ToArray(), 0x87FFFC, 0x87FFFF, FlashingText));
                 }
+                Debug.WriteLine("AFFE0815 Bypass Possible: " + affe0815_bypass_possible);
+                Debug.WriteLine("Signature Valid: " + IsSigValid);
+                Debug.WriteLine("RSA Bypass Installed: " + RSABypassInstalled);
+                Debug.WriteLine("affe0815_bypass_possible && !(IsSigValid || RSABypassInstalled): " + (affe0815_bypass_possible && !(IsSigValid || RSABypassInstalled)));
 
-                if (affe0815_bypass_possible && (!IsSigValid || !RSABypassInstalled))
+                if (affe0815_bypass_possible && !(IsSigValid || RSABypassInstalled))
                 {
-                    
                     if (success)
                     {
                         FlashingText = String.Empty;
@@ -1867,7 +1930,7 @@ namespace MSS6x_Flasher
                                 {
                                     statusTextBlock.Text = "Signature check failed";
                                 });
-                                //Console.WriteLine(GetResult_String("JOB_STATUS", ediabas.ResultSets));
+                                //Debug.WriteLine(GetResult_String("JOB_STATUS", ediabas.ResultSets));
                                 success = false;
                                 ReenableButtons(this, null);
                                 if (!ExecuteJob(ediabas, "STEUERGERAETE_RESET", String.Empty))
@@ -1934,15 +1997,13 @@ namespace MSS6x_Flasher
             String FlashingText = String.Empty;
 
             bool SigValid = ChecksumsSignatures.IsProgramSignatureValid(full);
-            bool RSABypassInstalled = false;
-            bool RSABypassReadable = false;
+
+            bool[] RSABypassArray = Global.RsaBypassStatus;
+            bool RSABypassReadable = RSABypassArray[0];
+            bool RSABypassInstalled = RSABypassArray[1];
 
             using (EdiabasNet ediabas = StartEdiabas(ConfigurationManager.AppSettings["Port"], ConfigurationManager.AppSettings["ecuPath"], ConfigurationManager.AppSettings["defaultSGBD"]))
-            {
-                bool[] RSABypassArray = IsRSASegmentReadable_Bypassed(ediabas);
-                RSABypassReadable = RSABypassArray[0];
-                RSABypassInstalled = RSABypassArray[1];
-            }
+
             if (!RSABypassReadable && !SigValid)
             {
                 string msg = "" +
@@ -1961,7 +2022,7 @@ namespace MSS6x_Flasher
                 else
                     RSABypassInstalled = true;
             }
-            if (!RSABypassReadable && SigValid)
+            else if (!RSABypassReadable && SigValid)
             {
                 string msg = "We cannot read your RSA bypass status. This can happen if your DME is read locked or if your most recent program write failed. "
                     + "If you know you have an RSA bypass, we can patch the loaded file to maintain the bypass.\n\nShould we assume RSA is already bypassed?";
@@ -1973,13 +2034,13 @@ namespace MSS6x_Flasher
                 else
                     RSABypassInstalled = true;
             }
-            
 
-            if (!SigValid && !RSABypassInstalled && !bypassRSA_stage1)
+
+            else if (!SigValid && !RSABypassInstalled && !bypassRSA_stage1)
             {
                 string msg = "We detected you are trying to flash a non-stock program. We cannot detect an RSA bypass. " +
                                 "This is likely to fail unless you know your Program RSA check is bypassed some other way (e.g BDM).\n\nWould you like to continue?";
-                MessageBoxResult result =  MessageBox.Show(msg, "RSA Bypass Not Installed", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+                MessageBoxResult result = MessageBox.Show(msg, "RSA Bypass Not Installed", MessageBoxButton.YesNo, MessageBoxImage.Warning);
                 if (result == MessageBoxResult.No)
                 {
                     RSABypassInstalled = false;
@@ -1992,15 +2053,30 @@ namespace MSS6x_Flasher
                 }
                 RSABypassInstalled = true;
             }
+            else if (!(bypassRSA_stage1 || bypassRSA_stage2))
+            {
+                string msg = "You are about to flash a program. Please ensure you have a stable power supply and a reliable cable.\n\nWould you like to continue?";
+
+                MessageBoxResult result = MessageBox.Show(msg, "Flash program?", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+                if (result == MessageBoxResult.No)
+                {
+                    this.Dispatcher.Invoke(() =>
+                    {
+                        statusTextBlock.Text = "Program flash cancelled";
+                    });
+                    ReenableButtons(this, null);
+                    return false;
+                }
+            }
 
 
             using (EdiabasNet ediabas = StartEdiabas(ConfigurationManager.AppSettings["Port"], ConfigurationManager.AppSettings["ecuPath"],  ConfigurationManager.AppSettings["defaultProgrammingSGBD"]))
             {
                 DisableButtons(this, null);
-                uint flashStart_Section1 = 0x10000;
-                uint flashEnd_Section1 = 0x1FFFF;
+                int flashStart_Section1 = 0x10000;
+                int flashEnd_Section1 = 0x1FFFF;
 
-                uint ignitionOffset = 0x800000;
+                int ignitionOffset = 0x800000;
 
                 byte[] injection = full.Take(0x280000).ToArray();
                 byte[] ignition = full.Skip(0x280000).Take(0x280000).ToArray();
@@ -2027,7 +2103,7 @@ namespace MSS6x_Flasher
 
                     if (!ExecuteJob(ediabas, "FLASH_PARAMETER_SETZEN", "0x12;64;64;254;Asymetrisch"))
                     {
-                        //Console.WriteLine("Failed to set DME flash parameters");
+                        //Debug.WriteLine("Failed to set DME flash parameters");
                     }
 
                    /* ExecuteJob(ediabas, "aif_lesen", string.Empty);
@@ -2050,39 +2126,39 @@ namespace MSS6x_Flasher
                     }
                 });
 
-                uint eraseStart = 0x10000;
-                uint eraseBlock = 0x1;
+                int eraseStart = 0x10000;
+                int eraseBlock = 0x1;
 
-                uint eraseStartRSA = 0x70000;
-                uint eraseBlockRSA = 0x1;
+                int eraseStartRSA = 0x70000;
+                int eraseBlockRSA = 0x1;
 
-                uint flashStart_Section2 = 0x20000;
-                uint flashEnd_Section2 = 0x6FFFF;
+                int flashStart_Section2 = 0x20000;
+                int flashEnd_Section2 = 0x6FFFF;
 
-                uint flashExtStart = 0x450000;
-                uint flashExtEnd_Inj = BitConverter.ToUInt32(injection.Skip(0x1001c).Take(4).Reverse().ToArray(), 0) + 7;
-                uint flashExtEnd_Ign = BitConverter.ToUInt32(ignition.Skip(0x1001c).Take(4).Reverse().ToArray(), 0) + 7;
+                int flashExtStart = 0x450000;
+                int flashExtEnd_Inj = BitConverter.ToInt32(injection.Skip(0x1001c).Take(4).Reverse().ToArray(), 0) + 7;
+                int flashExtEnd_Ign = BitConverter.ToInt32(ignition.Skip(0x1001c).Take(4).Reverse().ToArray(), 0) + 7;
 
                 if (flashExtEnd_Inj > 0x5FFFFF)
                     flashExtEnd_Inj = 0x5FFFFF;
                 if (flashExtEnd_Ign > 0x5FFFFF)
                     flashExtEnd_Ign = 0x5FFFFF;
 
-               // //Console.WriteLine(flashExtEnd_Inj.ToString("x"));
-               // //Console.WriteLine(flashExtEnd_Ign.ToString("x"));
+               // //Debug.WriteLine(flashExtEnd_Inj.ToString("x"));
+               // //Debug.WriteLine(flashExtEnd_Ign.ToString("x"));
 
                 await Task.Run(() =>
                     {
 
                         if (!ExecuteJob(ediabas, "normaler_datenverkehr", "nein;nein;ja"))
                         {
-                            //Console.WriteLine("Failed to shut down vehicle electronics");
+                            //Debug.WriteLine("Failed to shut down vehicle electronics");
                             //success = false;
                         }
 
                         if (!ExecuteJob(ediabas, "normaler_datenverkehr", "ja;nein;nein"))
                         {
-                            //Console.WriteLine("Failed to shut down vehicle electronics");
+                            //Debug.WriteLine("Failed to shut down vehicle electronics");
                             //success = false;
                         }
                     });
@@ -2237,8 +2313,6 @@ namespace MSS6x_Flasher
 
                             if (bypassRSA_stage1)
                                 statusTextBlock.Text = "RSA Bypass accepted. Preparing DME for program";
-                            else
-                                statusTextBlock.Text = "Program flash success. Flash tune to finish";
                         });
 
 
@@ -2256,12 +2330,12 @@ namespace MSS6x_Flasher
                     }
                 }
                 IdentDME();
-                if (!bypassRSA_stage1)
+                if (!bypassRSA_stage1 && success)
                 {
                     byte[] tune = full.Skip(0x70000).Take(0x10000).Concat(full.Skip(0x2F0000).Take(0x10000)).ToArray();
                     if (success)
                     {
-                        await Task.Run(() => success = FlashDME_Data(tune).Result);
+                        await Task.Run(() => success = FlashDME_Data(tune,true).Result);
                     }
                     ReenableButtons(this, null);
                     if (!bypassRSA_stage2)
@@ -2273,13 +2347,13 @@ namespace MSS6x_Flasher
             }
         }
 
-        private bool FlashBlock(EdiabasNet ediabas, byte[] toFlash, uint blockStart, uint blockEnd, string FlashingText)
+        private bool FlashBlock(EdiabasNet ediabas, byte[] toFlash, int blockStart, int blockEnd, string FlashingText)
         {
             SetThreadExecutionState(EXECUTION_STATE.ES_CONTINUOUS | EXECUTION_STATE.ES_SYSTEM_REQUIRED | EXECUTION_STATE.ES_AWAYMODE_REQUIRED); //Should prevent system from going idle while flashing
        
 
-            uint blockStartOrig = blockStart;
-            uint blockLength = blockEnd - blockStart + 1;
+            int blockStartOrig = blockStart;
+            int blockLength = blockEnd - blockStart + 1;
 
             byte[] flashAddressSet = new Byte[22];
             flashAddressSet[0] = 1;
@@ -2311,7 +2385,7 @@ namespace MSS6x_Flasher
                 this.Dispatcher.Invoke(() =>
                 {
                     statusTextBlock.Text = "Failed to set flash address @ 0x" +blockStart.ToString("x");
-                    //Console.WriteLine("Flash Address Message: " + BitConverter.ToString(GetResult_ByteArray("_TEL_AUFTRAG", ediabas.ResultSets)));
+                    //Debug.WriteLine("Flash Address Message: " + BitConverter.ToString(GetResult_ByteArray("_TEL_AUFTRAG", ediabas.ResultSets)));
                 });
                 ReenableButtons(this, null);
                 SetThreadExecutionState(EXECUTION_STATE.ES_CONTINUOUS);
@@ -2340,14 +2414,14 @@ namespace MSS6x_Flasher
                     ReenableButtons(this, null);
                     this.Dispatcher.Invoke(() =>
                     {
-                        //Console.WriteLine("Flash failed at 0x" + blockStart.ToString("X") + ". Resetting DME.");
+                        //Debug.WriteLine("Flash failed at 0x" + blockStart.ToString("X") + ". Resetting DME.");
                         statusTextBlock.Text = "Flash failed at 0x" + blockStart.ToString("X") + ". Resetting DME.";
                     });
                     if (!ExecuteJob(ediabas, "STEUERGERAETE_RESET", String.Empty))
                     {
                         this.Dispatcher.Invoke(() =>
                         {
-                            //Console.WriteLine("Error Resetting ECU");
+                            //Debug.WriteLine("Error Resetting ECU");
                         });
                         SetThreadExecutionState(EXECUTION_STATE.ES_CONTINUOUS);
                         return false;
@@ -2355,12 +2429,12 @@ namespace MSS6x_Flasher
                     SetThreadExecutionState(EXECUTION_STATE.ES_CONTINUOUS);
                     return false;
                 }
-                blockStart += (uint)flashSegLength;
-                blockLength -= (uint)flashSegLength;
+                blockStart += flashSegLength;
+                blockLength -= flashSegLength;
 
                 if (blockEnd - blockStartOrig > 255)
                 {
-                    uint progress = (blockStart - blockStartOrig) * 4096 / (blockEnd - blockStartOrig);
+                    int progress = (blockStart - blockStartOrig) * 4096 / (blockEnd - blockStartOrig);
                     UpdateProgressBar(progress);
                 }
 
@@ -2380,7 +2454,7 @@ namespace MSS6x_Flasher
             return true;
         }
 
-        private bool EraseECU(EdiabasNet ediabas, uint blockLength, uint blockStart)
+        private bool EraseECU(EdiabasNet ediabas, int blockLength, int blockStart)
         {
             string flashEraseJob = "flash_loeschen";
             byte[] eraseCommand = new Byte[22];
@@ -2389,7 +2463,7 @@ namespace MSS6x_Flasher
             eraseCommand[4] = 0xFA;
             eraseCommand[9] = 0xFF;
 
-            BitConverter.GetBytes(blockStart).CopyTo(eraseCommand, 17); //Start address
+            BitConverter.GetBytes(blockStart).CopyTo(eraseCommand, 17); //Start subAddress
             BitConverter.GetBytes(blockLength).CopyTo(eraseCommand, 13); //Length - doesn't really matter for erases. 
                                                                          //Erasing anything in the program space will erase the entire program space for both CPUs
                                                                          //Erasing anything in the parameter space will erase entire parameter space for both CPUs
@@ -2434,7 +2508,7 @@ namespace MSS6x_Flasher
 
             if (!ExecuteJob(ediabas, "seriennummer_lesen", string.Empty))
             {
-                Console.WriteLine("Failed to get serial number");
+                Debug.WriteLine("Failed to get serial number");
                 this.Dispatcher.Invoke(() =>
                 {
                     ProgressDME.IsIndeterminate = false;
@@ -2443,15 +2517,13 @@ namespace MSS6x_Flasher
             }
 
             byte[] serialReply = GetResult_ByteArray("_TEL_ANTWORT", ediabas.ResultSets);
-            //Console.WriteLine(BitConverter.ToString(serialReply));
+            //Debug.WriteLine(BitConverter.ToString(serialReply));
             byte[] serialNumber = serialReply.Skip(serialReply.Length - 5).Take(4).ToArray(); //DME uses last 4 bytes of serial number in authentication message
-            byte[] userID = new byte[4]; //user ID can be any 4 bytes. 
-            Random rng = new Random();
-            rng.NextBytes(userID);
+            byte[] userID = { 0x2f,0x2f,0x2f,0x4d }; //user ID can be any 4 bytes. 
 
-            if (!ExecuteJob(ediabas, "authentisierung_zufallszahl_lesen", securityAccessLevel.ToString() + ";0x" + BitConverter.ToUInt32(userID.Reverse().ToArray(), 0).ToString("X")))//Request random number, passing the "userID" generated above as an argument
+            if (!ExecuteJob(ediabas, "authentisierung_zufallszahl_lesen", securityAccessLevel.ToString() + ";0x" + BitConverter.ToInt32(userID.Reverse().ToArray(), 0).ToString("X")))//Request random number, passing the "userID" generated above as an argument
             {
-                Console.WriteLine("Failed to get random number");
+                Debug.WriteLine("Failed to get random number");
                 this.Dispatcher.Invoke(() =>
                 {
                     ProgressDME.IsIndeterminate = false;
@@ -2460,10 +2532,10 @@ namespace MSS6x_Flasher
             }
             byte[] seed = GetResult_ByteArray("ZUFALLSZAHL", ediabas.ResultSets); //DME sends a random number
 
-            //Console.WriteLine(BitConverter.ToString(userID.Concat(serialNumber.Concat(seed)).ToArray()));           
+            //Debug.WriteLine(BitConverter.ToString(userID.Concat(serialNumber.Concat(seed)).ToArray()));           
             if (!ExecuteJob(ediabas, "authentisierung_start", ChecksumsSignatures.GetSecurityAccessMessage(userID, serialNumber, seed, securityAccessLevel))) //Sign message using private key. If DME decrypts successfully and it matches its own calculation, security access is granted
             {
-                Console.WriteLine("Failed to authenticate tester");
+                Debug.WriteLine("Failed to authenticate tester");
                 this.Dispatcher.Invoke(() =>
                 {
                     ProgressDME.IsIndeterminate = false;
@@ -2475,7 +2547,7 @@ namespace MSS6x_Flasher
             {
                 if (!ExecuteJob(ediabas, "diagnose_mode", "ECUPM"))
                 {
-                    Console.WriteLine("Could Not Request ECUPM");
+                    Debug.WriteLine("Could Not Request ECUPM");
                     this.Dispatcher.Invoke(() =>
                     {
                         ProgressDME.IsIndeterminate = false;
@@ -2514,11 +2586,7 @@ namespace MSS6x_Flasher
             EdInterfaceBase edInterface = null;
 
             /* Thus far unable to get ICOM to work -- might only work with newer (ENET) cars as far as EdiabasLib goes
-             * Tried making my own EdiabasLib bluetooth adapter from an ELM327, but the thing ended up bricked
-             * The only places that sell a premade one don't ship to the US due to the unpredictable tariffs
-             * So for now, only the K-line and K+D-Can cables are supported. Unfortunately speed for these are limited by the 115200bps baudrate. Have not been successful in increasing this
-             * Supporting a native CAN interface (perhaps building off CandleLight project) could be great, but beyond the scope of this project. And probably a decade too late
-             * Perhaps we can take ENET commands and translate them to a CAN interface? 
+             * For now, only the K-line and K+D-Can cables are supported. Unfortunately speed for these are limited by the 115200bps baudrate. Have not been successful in increasing this
              */
 
             /*string ifhName = String.Empty;
@@ -2626,7 +2694,7 @@ namespace MSS6x_Flasher
             string errorDescription = EdiabasNet.GetErrorDescription(error);
             System.Diagnostics.Debug.WriteLine("Error occured: 0x{0:X08} {1}", new object[]
             {
-        (uint)error,
+        (int)error,
         errorDescription
             });
         }
@@ -2683,8 +2751,8 @@ namespace MSS6x_Flasher
             {
                 if (ediabas.ErrorCodeLast == EdiabasNet.ErrorCodes.EDIABAS_ERR_NONE)
                 {
-                    System.Diagnostics.Debug.WriteLine("Job execution failed: " + EdiabasNet.GetExceptionText(ex));
-                    System.Diagnostics.Debug.WriteLine("");
+                    Debug.WriteLine("Job execution failed: " + EdiabasNet.GetExceptionText(ex));
+                    Debug.WriteLine("");
 
                 }
                 return false;
@@ -2703,8 +2771,8 @@ namespace MSS6x_Flasher
             {
                 if (ediabas.ErrorCodeLast == EdiabasNet.ErrorCodes.EDIABAS_ERR_NONE)
                 {
-                    System.Diagnostics.Debug.WriteLine("Job execution failed: " + EdiabasNet.GetExceptionText(ex));
-                    System.Diagnostics.Debug.WriteLine("");
+                    Debug.WriteLine("Job execution failed: " + EdiabasNet.GetExceptionText(ex));
+                    Debug.WriteLine("");
                 }
                 return false;
             }
